@@ -2,6 +2,7 @@
 
 #include "core/AozoraExport.h"
 #include "core/KindleImport.h"
+#include "core/TranslatedEpub.h"
 #include "core/Markdown.h"
 #include "core/Matcher.h"
 #include "core/Search.h"
@@ -41,7 +42,9 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QEventLoop>
 #include <QFormLayout>
+#include <QProgressDialog>
 #include <QJsonArray>
 #include <iterator>
 #include <QPushButton>
@@ -64,6 +67,23 @@
 #include <QWebEngineView>
 
 namespace {
+
+// Floating translation result popup: a Qt::Popup (so an outside click dismisses
+// it) that also closes on Escape.
+class TranslatePopup : public QLabel {
+public:
+    TranslatePopup() : QLabel(nullptr, Qt::Popup) {}
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override
+    {
+        if (event->key() == Qt::Key_Escape) {
+            hide();
+            return;
+        }
+        QLabel::keyPressEvent(event);
+    }
+};
 
 QColor highlightQColor(HighlightColor c)
 {
@@ -123,8 +143,16 @@ QIcon swatchIcon(HighlightColor c)
 
 } // namespace
 
+static int g_windowCount = 0;
+
+int MainWindow::instanceCount() { return g_windowCount; }
+
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
+    static int windowCounter = 0;
+    m_schemeId = QStringLiteral("b%1").arg(windowCounter++); // unique epub:// host
+    ++g_windowCount;
+
     setWindowTitle(QStringLiteral("Spindle"));
     resize(1180, 800);
     setAcceptDrops(true);
@@ -134,12 +162,40 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_searchDebounce->setInterval(180);
     connect(m_searchDebounce, &QTimer::timeout, this, &MainWindow::runSearch);
 
+    m_trCacheSave = new QTimer(this);
+    m_trCacheSave->setSingleShot(true);
+    m_trCacheSave->setInterval(1500);
+    connect(m_trCacheSave, &QTimer::timeout, this, [this] { m_trCache.flush(); });
+
     buildUi();
     updateNavButtons();
     updateSidebarMode();
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow()
+{
+    m_trCache.flush();
+    EpubSchemeHandler::instance()->unregisterBook(m_schemeId);
+    --g_windowCount;
+}
+
+MainWindow *MainWindow::openInNewWindow(const QString &filePath)
+{
+    auto *w = new MainWindow();
+    w->setAttribute(Qt::WA_DeleteOnClose);
+    w->show();
+    if (!filePath.isEmpty())
+        w->openEpub(filePath);
+    return w;
+}
+
+void MainWindow::openEpubSmart(const QString &filePath)
+{
+    if (m_book)
+        openInNewWindow(filePath); // keep the current book; open another window
+    else
+        openEpub(filePath);
+}
 
 void MainWindow::buildUi()
 {
@@ -164,8 +220,23 @@ void MainWindow::buildUi()
     chapterMenu->addAction(QStringLiteral("青空文庫 XHTML で書き出し…"), this,
                            &MainWindow::exportChapterAozora);
 
+    QMenu *trMenu = menuBar()->addMenu(QStringLiteral("翻訳"));
+    trMenu->addAction(QStringLiteral("設定…"), this, &MainWindow::openTranslateDialog);
+    trMenu->addSeparator();
+    trMenu->addAction(QStringLiteral("対訳 EPUB を書き出し…"), this,
+                      [this] { exportTranslatedEpub(0); });
+    trMenu->addAction(QStringLiteral("訳文 EPUB を書き出し…"), this,
+                      [this] { exportTranslatedEpub(1); });
+
     QToolBar *toolbar = addToolBar(QStringLiteral("Main"));
     toolbar->setMovable(false);
+    QAction *sidebarAction = toolbar->addAction(QStringLiteral("☰ 目次"));
+    sidebarAction->setCheckable(true);
+    sidebarAction->setChecked(true);
+    sidebarAction->setToolTip(QStringLiteral("目次サイドバーの表示/非表示"));
+    connect(sidebarAction, &QAction::toggled, this,
+            [this](bool on) { if (m_sidebar) m_sidebar->setVisible(on); });
+    toolbar->addSeparator();
     m_prevAction = toolbar->addAction(QStringLiteral("‹ 前"));
     m_nextAction = toolbar->addAction(QStringLiteral("次 ›"));
     connect(m_prevAction, &QAction::triggered, this, &MainWindow::previousChapter);
@@ -185,6 +256,7 @@ void MainWindow::buildUi()
 
     // --- sidebar ---
     QWidget *sidebar = new QWidget(this);
+    m_sidebar = sidebar;
     QVBoxLayout *sideLayout = new QVBoxLayout(sidebar);
     sideLayout->setContentsMargins(10, 10, 10, 10);
     sideLayout->setSpacing(8);
@@ -251,9 +323,9 @@ void MainWindow::buildUi()
     sideLayout->addWidget(m_sidebarStack, 1);
 
     // --- web viewer ---
+    // The epub:// scheme handler is installed once, globally, on the default
+    // profile (see main()); this window just registers its book under m_schemeId.
     m_view = new QWebEngineView(this);
-    m_scheme = new EpubSchemeHandler(this);
-    m_view->page()->profile()->installUrlSchemeHandler(EpubSchemeHandler::schemeName(), m_scheme);
     m_view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
     m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
     connect(m_view, &QWebEngineView::loadFinished, this, &MainWindow::onLoadFinished);
@@ -280,6 +352,10 @@ void MainWindow::setupWebChannel()
 
     m_ollama = new OllamaClient(this);
     connect(m_ollama, &OllamaClient::finished, this, &MainWindow::onOllamaFinished);
+
+    m_selectionOllama = new OllamaClient(this);
+    connect(m_selectionOllama, &OllamaClient::finished, this,
+            &MainWindow::onSelectionTranslated);
 
     QSettings settings;
     m_trTarget = settings.value(QStringLiteral("translate/target"), m_trTarget).toString();
@@ -322,7 +398,7 @@ void MainWindow::onOpenTriggered()
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("EPUB を開く"), QString(), QStringLiteral("EPUB (*.epub)"));
     if (!path.isEmpty())
-        openEpub(path);
+        openEpubSmart(path);
 }
 
 bool MainWindow::openEpub(const QString &filePath)
@@ -336,13 +412,15 @@ bool MainWindow::openEpub(const QString &filePath)
     }
 
     m_book = std::move(book);
-    m_scheme->setBook(m_book.get());
+    m_epubPath = filePath;
+    EpubSchemeHandler::instance()->registerBook(m_schemeId, m_book.get());
     m_chapterTexts.clear();
     m_chapterTextsReady = false;
     m_searchInput->clear();
 
     m_bookId = bookId(m_book->title(), m_book->author());
     m_highlights = highlight_store::load(m_bookId);
+    m_trCache.load(m_bookId, m_trTarget);
 
     m_titleLabel->setText(m_book->title().isEmpty() ? QStringLiteral("(無題)") : m_book->title());
     m_authorLabel->setText(m_book->author());
@@ -430,7 +508,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     }
 
     m_pendingFragment = fragment;
-    QString urlStr = EpubSchemeHandler::urlFor(chapter.path);
+    QString urlStr = EpubSchemeHandler::urlFor(m_schemeId, chapter.path);
     if (!fragment.isEmpty())
         urlStr += QLatin1Char('#') + fragment;
     m_view->page()->setBackgroundColor(themeBackground());
@@ -497,6 +575,10 @@ void MainWindow::injectViewStyle()
                              "body{color:#d8d8da !important;} a{color:#6db3ff !important;}");
         break;
     }
+    // Comfortable left/right reading margins (physical, so they apply equally to
+    // horizontal and vertical-rl writing modes). box-sizing keeps them inside.
+    css += QStringLiteral(" html{box-sizing:border-box;padding-left:6%;padding-right:6%;}");
+
     const QString js = QStringLiteral(
         "(function(){var s=document.getElementById('__spindle_theme');"
         "if(!s){s=document.createElement('style');s.id='__spindle_theme';"
@@ -648,11 +730,14 @@ void MainWindow::onWebSelection(int start, int end, const QString &text)
         map.insert(menu.addAction(swatchIcon(c), highlightLabel(c)), c);
     menu.addSeparator();
     QAction *withNote = menu.addAction(QStringLiteral("＋ ノート付きで追加…"));
+    QAction *translateAction = menu.addAction(QStringLiteral("🌐 翻訳"));
 
     QAction *chosen = menu.exec(QCursor::pos());
     if (!chosen)
         return;
-    if (chosen == withNote) {
+    if (chosen == translateAction) {
+        translateSelection(text);
+    } else if (chosen == withNote) {
         bool ok = false;
         const QString note = QInputDialog::getMultiLineText(
             this, QStringLiteral("ノート"), QStringLiteral("ノートを入力:"), QString(), &ok);
@@ -938,6 +1023,74 @@ void MainWindow::exportChapterAozora()
         f.write(xhtml.toUtf8());
 }
 
+void MainWindow::exportTranslatedEpub(int mode)
+{
+    if (!m_book || m_epubPath.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("先に EPUB を開いてください。"));
+        return;
+    }
+    const auto emode = mode == 1 ? translated_epub::Mode::Translation
+                                 : translated_epub::Mode::Bilingual;
+    const QString label = mode == 1 ? QStringLiteral("訳文") : QStringLiteral("対訳");
+
+    // Translate any paragraphs not yet cached, filling the cache.
+    const QStringList missing = translated_epub::collectMissing(*m_book, m_trCache);
+    if (!missing.isEmpty()) {
+        QProgressDialog progress(
+            QStringLiteral("未翻訳の段落を翻訳しています（%1 へ: %2）…")
+                .arg(targetLanguageName(m_trTarget), m_trModel),
+            QStringLiteral("キャンセル"), 0, missing.size(), this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setMinimumDuration(0);
+
+        OllamaClient client;
+        int done = 0;
+        for (const QString &text : missing) {
+            if (progress.wasCanceled())
+                return;
+            progress.setValue(done);
+
+            QEventLoop loop;
+            bool ok = false;
+            QString out;
+            auto conn = connect(&client, &OllamaClient::finished, &loop,
+                                [&](bool o, const QString &r) { ok = o; out = r; loop.quit(); });
+            client.translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), text);
+            loop.exec();
+            disconnect(conn);
+
+            if (!ok) {
+                QMessageBox::warning(this, QStringLiteral("Spindle"),
+                                     QStringLiteral("翻訳に失敗しました:\n%1").arg(out));
+                m_trCache.flush();
+                return;
+            }
+            m_trCache.put(text, out);
+            ++done;
+        }
+        progress.setValue(missing.size());
+        m_trCache.flush();
+    }
+
+    QString suggested = m_book->title().isEmpty() ? QStringLiteral("book") : m_book->title();
+    suggested.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
+    const QString outPath = QFileDialog::getSaveFileName(
+        this, QStringLiteral("%1 EPUB を書き出し").arg(label),
+        QStringLiteral("%1_%2.epub").arg(suggested, label), QStringLiteral("EPUB (*.epub)"));
+    if (outPath.isEmpty())
+        return;
+
+    QString err;
+    if (translated_epub::write(*m_book, m_epubPath, outPath, emode, m_trCache, &err)) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("%1 EPUB を書き出しました。").arg(label));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("書き出しに失敗しました:\n%1").arg(err));
+    }
+}
+
 // --- translation -----------------------------------------------------------
 
 QString MainWindow::translateViewString() const
@@ -967,8 +1120,16 @@ void MainWindow::onBlocksReady(const QString &json)
     m_trQueue.clear();
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
-        m_trQueue.append({o.value(QStringLiteral("index")).toInt(),
-                          o.value(QStringLiteral("text")).toString()});
+        const int index = o.value(QStringLiteral("index")).toInt();
+        const QString text = o.value(QStringLiteral("text")).toString();
+        // Cache hit → apply instantly without calling Ollama.
+        const QString cached = m_trCache.lookup(text);
+        if (!cached.isEmpty()) {
+            if (m_bridge)
+                m_bridge->applyTranslation(index, cached, QString());
+            continue;
+        }
+        m_trQueue.append({index, text});
     }
     m_trCursor = 0;
     m_trAnyOk = false;
@@ -983,6 +1144,7 @@ void MainWindow::translateNext(int run)
         return;
     const auto &item = m_trQueue.at(m_trCursor);
     m_trCurIndex = item.first;
+    m_trCurText = item.second;
     m_trReqRun = run;
     if (m_bridge)
         m_bridge->applyTranslation(m_trCurIndex, QStringLiteral("翻訳中…"),
@@ -997,6 +1159,8 @@ void MainWindow::onOllamaFinished(bool ok, const QString &result)
 
     if (ok) {
         m_trAnyOk = true;
+        m_trCache.put(m_trCurText, result); // remember for next time / export
+        m_trCacheSave->start();
         if (m_bridge)
             m_bridge->applyTranslation(m_trCurIndex, result, QString());
     } else {
@@ -1013,6 +1177,42 @@ void MainWindow::onOllamaFinished(bool ok, const QString &result)
     }
     ++m_trCursor;
     translateNext(m_trRunId);
+}
+
+void MainWindow::translateSelection(const QString &text)
+{
+    const QString src = text.trimmed();
+    if (src.isEmpty())
+        return;
+    showTranslatePopup(QStringLiteral("翻訳中…"));
+    m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), src);
+}
+
+void MainWindow::onSelectionTranslated(bool ok, const QString &result)
+{
+    if (!m_translatePopup || !m_translatePopup->isVisible())
+        return;
+    showTranslatePopup(ok ? result : QStringLiteral("⚠ 翻訳に失敗しました: ") + result);
+}
+
+void MainWindow::showTranslatePopup(const QString &text)
+{
+    if (!m_translatePopup) {
+        m_translatePopup = new TranslatePopup();
+        m_translatePopup->setWordWrap(true);
+        m_translatePopup->setMargin(12);
+        m_translatePopup->setMaximumWidth(440);
+        m_translatePopup->setFocusPolicy(Qt::StrongFocus);
+        m_translatePopup->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        m_translatePopup->setStyleSheet(
+            QStringLiteral("QLabel{background:#2b2b2e;color:#eaeaea;border:1px solid #555;"
+                           "border-radius:8px;font-size:14px;}"));
+    }
+    m_translatePopup->setText(text);
+    m_translatePopup->adjustSize();
+    m_translatePopup->move(QCursor::pos() + QPoint(8, 14));
+    m_translatePopup->show();
+    m_translatePopup->setFocus(); // ensure it receives the Escape key
 }
 
 void MainWindow::openTranslateDialog()
@@ -1060,13 +1260,17 @@ void MainWindow::openTranslateDialog()
             [this](int idx) { setTranslateView(idx); });
 
     connect(&dialog, &QDialog::accepted, this, [&]() {
-        m_trTarget = targetBox->currentData().toString();
+        const QString newTarget = targetBox->currentData().toString();
         m_trModel = modelEdit->text().trimmed().isEmpty() ? QStringLiteral("qwen2.5")
                                                           : modelEdit->text().trimmed();
         QString ep = endpointEdit->text().trimmed();
         while (ep.endsWith(QLatin1Char('/')))
             ep.chop(1);
         m_trEndpoint = ep.isEmpty() ? QStringLiteral("http://localhost:11434") : ep;
+        if (newTarget != m_trTarget) {
+            m_trTarget = newTarget;
+            m_trCache.load(m_bookId, m_trTarget); // switch to the new language's cache
+        }
         QSettings settings;
         settings.setValue(QStringLiteral("translate/target"), m_trTarget);
         settings.setValue(QStringLiteral("translate/model"), m_trModel);
@@ -1267,12 +1471,11 @@ void MainWindow::dragEnterEvent(QDragEnterEvent *event)
 
 void MainWindow::dropEvent(QDropEvent *event)
 {
+    // Each dropped EPUB opens its own window (the current book stays open).
     for (const QUrl &url : event->mimeData()->urls()) {
         const QString local = url.toLocalFile();
-        if (local.endsWith(QStringLiteral(".epub"), Qt::CaseInsensitive)) {
-            openEpub(local);
-            return;
-        }
+        if (local.endsWith(QStringLiteral(".epub"), Qt::CaseInsensitive))
+            openEpubSmart(local);
     }
 }
 

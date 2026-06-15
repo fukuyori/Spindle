@@ -38,12 +38,29 @@ EpubSchemeHandler::EpubSchemeHandler(QObject *parent)
 {
 }
 
-QString EpubSchemeHandler::urlFor(const QString &zipPath)
+EpubSchemeHandler *EpubSchemeHandler::instance()
+{
+    static EpubSchemeHandler *handler = new EpubSchemeHandler();
+    return handler;
+}
+
+void EpubSchemeHandler::registerBook(const QString &id, EpubBook *book)
+{
+    m_books.insert(id, book);
+}
+
+void EpubSchemeHandler::unregisterBook(const QString &id)
+{
+    m_books.remove(id);
+}
+
+QString EpubSchemeHandler::urlFor(const QString &id, const QString &zipPath)
 {
     QString clean = zipPath;
     while (clean.startsWith(QLatin1Char('/')))
         clean.remove(0, 1);
-    return QStringLiteral("epub://book/") + QString::fromUtf8(QUrl::toPercentEncoding(clean, "/"));
+    return QStringLiteral("epub://") + id + QLatin1Char('/')
+           + QString::fromUtf8(QUrl::toPercentEncoding(clean, "/"));
 }
 
 QString EpubSchemeHandler::zipPathFor(const QUrl &url)
@@ -69,18 +86,20 @@ void EpubSchemeHandler::registerScheme()
 
 void EpubSchemeHandler::requestStarted(QWebEngineUrlRequestJob *job)
 {
-    if (!m_book) {
+    const QString id = job->requestUrl().host();
+    EpubBook *book = m_books.value(id, nullptr);
+    if (!book) {
         job->fail(QWebEngineUrlRequestJob::RequestFailed);
         return;
     }
     const QString zipPath = zipPathFor(job->requestUrl());
-    if (!m_book->contains(zipPath)) {
+    if (!book->contains(zipPath)) {
         job->fail(QWebEngineUrlRequestJob::UrlNotFound);
         return;
     }
 
     QBuffer *buffer = new QBuffer(job);
-    buffer->setData(m_book->readBytes(zipPath));
+    buffer->setData(book->readBytes(zipPath));
     buffer->open(QIODevice::ReadOnly);
     job->reply(mimeFor(zipPath), buffer);
 }

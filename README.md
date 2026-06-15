@@ -20,7 +20,7 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Full-fidelity rendering** via Qt WebEngine + the `epub://` scheme:
   vertical & horizontal layouts, publisher CSS, embedded fonts and images.
 - **Reading controls** — chapter navigation, font zoom, light / sepia / dark
-  themes.
+  themes, and a collapsible table-of-contents sidebar.
 - **Full-text search** across the whole book with chapter-grouped snippets and
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
@@ -32,15 +32,19 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   offsets.
 - **Aozora Bunko XHTML** export of the current chapter (ruby preserved, images
   inlined as data URIs).
-- **Local AI translation** via [Ollama](https://ollama.com) — original /
-  bilingual / translation-only view modes, configurable model, target language
-  and endpoint.
-- **Drag-and-drop** and command-line file opening.
+- **Local AI translation** via [Ollama](https://ollama.com) — whole-chapter
+  modes (original / bilingual / translation-only) plus on-the-spot translation
+  of a selection; configurable model, target language and endpoint.
+- **XHTML source view** — toggle the current chapter between the rendered view
+  and its raw markup.
+- **Multiple books at once** — each EPUB opens in its own window.
+- **Drag-and-drop**, command-line arguments, and "open with" file opening.
 
 ## Usage
 
-Open an EPUB with the **＋** menu (ファイル → EPUB を開く), by dragging a `.epub`
-onto the window, or by passing a path on the command line.
+Open an EPUB from **ファイル → EPUB を開く**, by dragging a `.epub` onto the
+window, or by passing one or more paths on the command line. Each book opens in
+its own window, so you can read several at once.
 
 | Action | Shortcut |
 |--------|----------|
@@ -48,11 +52,15 @@ onto the window, or by passing a path on the command line.
 | Previous chapter | `←` |
 | Focus search | `Cmd` / `Ctrl` + `F` |
 
+- **Sidebar:** toggle the table-of-contents sidebar with the **☰ 目次** button.
 - **Highlight:** select text → pick a colour from the popup. Click an existing
   highlight to change its colour, edit its note, or delete it.
 - **Translation:** click **🌐**, choose a mode (original / bilingual /
-  translation), set the model + target language, and press 再翻訳. Requires a
-  running Ollama instance with the chosen model installed (default `qwen2.5`).
+  translation), set the model + target language, and press 再翻訳; or select
+  text and choose **🌐 翻訳** to translate just that selection (the result popup
+  closes on Escape or an outside click). Requires a running Ollama instance with
+  the chosen model installed (default `qwen2.5`).
+- **Source view:** the **</> XML** button shows the chapter's raw XHTML.
 
 ## Build
 
@@ -119,11 +127,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.1.1` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.1.2` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.1.1 && git push origin v0.1.1
+git tag v0.1.2 && git push origin v0.1.2
 ```
 
 ## Project layout

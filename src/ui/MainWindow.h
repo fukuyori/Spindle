@@ -3,6 +3,7 @@
 #include "core/ChapterText.h"
 #include "epub/EpubBook.h"
 #include "model/Highlight.h"
+#include "model/TranslationCache.h"
 
 #include <QMainWindow>
 #include <QPair>
@@ -35,6 +36,13 @@ public:
 
     bool openEpub(const QString &filePath);
 
+    // Open `path` in this window if it has no book yet, otherwise in a new one.
+    void openEpubSmart(const QString &filePath);
+    // Create a fresh window (auto-deleted on close) and optionally open a book.
+    static MainWindow *openInNewWindow(const QString &filePath = QString());
+    // Number of live MainWindow instances.
+    static int instanceCount();
+
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
@@ -59,12 +67,14 @@ private slots:
     void openTranslateDialog();
     void onBlocksReady(const QString &json);
     void onOllamaFinished(bool ok, const QString &result);
+    void onSelectionTranslated(bool ok, const QString &result);
     void onMarkClicked(const QString &id);
     void exportHighlightsMarkdown();
     void exportHighlightsJson();
     void importHighlights();
     void importKindleNotebook();
     void exportChapterAozora();
+    void exportTranslatedEpub(int mode); // 0 bilingual, 1 translation-only
 
 private:
     void buildUi();
@@ -98,12 +108,15 @@ private:
     void setTranslateView(int view); // 0 original, 1 bilingual, 2 translation
     void translateNext(int run);
     QString translateViewString() const;
+    void translateSelection(const QString &text);
+    void showTranslatePopup(const QString &text);
 
     enum class Theme { Light, Sepia, Dark };
     enum class TranslateView { Original, Bilingual, Translation };
 
     std::unique_ptr<EpubBook> m_book;
     QString m_bookId;
+    QString m_epubPath; // source .epub path (for translated-epub export)
     int m_currentChapter = -1;
     int m_fontSize = 100; // percent (zoom)
     Theme m_theme = Theme::Light;
@@ -116,11 +129,13 @@ private:
     QString m_pendingFragment;
     QString m_pendingFind;
 
+    QString m_schemeId; // unique epub:// host for this window's book
     QWebEngineView *m_view = nullptr;
-    EpubSchemeHandler *m_scheme = nullptr;
     QWebChannel *m_channel = nullptr;
     Bridge *m_bridge = nullptr;
     OllamaClient *m_ollama = nullptr;
+    OllamaClient *m_selectionOllama = nullptr; // ad-hoc selection translation
+    QLabel *m_translatePopup = nullptr;
 
     TranslateView m_translateView = TranslateView::Original;
     QString m_trTarget = QStringLiteral("ja");
@@ -131,10 +146,14 @@ private:
     int m_trRunId = 0;
     int m_trReqRun = 0;
     int m_trCurIndex = -1;
+    QString m_trCurText; // source text of the in-flight translation
     bool m_trAnyOk = false;
+    TranslationCache m_trCache;
+    QTimer *m_trCacheSave = nullptr;
     QTreeWidget *m_toc = nullptr;
     QListWidget *m_highlightsList = nullptr;
     QListWidget *m_searchResults = nullptr;
+    QWidget *m_sidebar = nullptr;
     QStackedWidget *m_sidebarStack = nullptr;
     QPushButton *m_tabToc = nullptr;
     QPushButton *m_tabHighlights = nullptr;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.1.1 LANGUAGES C CXX)
+project(Spindle VERSION 0.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +61,8 @@ qt_add_executable(spindle
   src/model/Highlight.h
   src/model/HighlightStore.cpp
   src/model/HighlightStore.h
+  src/model/TranslationCache.cpp
+  src/model/TranslationCache.h
   src/core/ChapterText.cpp
   src/core/ChapterText.h
   src/core/Search.cpp
@@ -73,6 +75,8 @@ qt_add_executable(spindle
   src/core/Matcher.h
   src/core/AozoraExport.cpp
   src/core/AozoraExport.h
+  src/core/TranslatedEpub.cpp
+  src/core/TranslatedEpub.h
   src/ui/MainWindow.cpp
   src/ui/MainWindow.h
 )
