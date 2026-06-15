@@ -48,6 +48,7 @@ private slots:
     void increaseFont();
     void decreaseFont();
     void cycleTheme();
+    void toggleXmlView(bool on);
     void onSearchTextChanged();
     void runSearch();
     void onSearchResultActivated(QListWidgetItem *item);
@@ -106,6 +107,7 @@ private:
     int m_currentChapter = -1;
     int m_fontSize = 100; // percent (zoom)
     Theme m_theme = Theme::Light;
+    bool m_xmlView = false; // show raw chapter source instead of rendered view
 
     QVector<ChapterText> m_chapterTexts;
     bool m_chapterTextsReady = false;

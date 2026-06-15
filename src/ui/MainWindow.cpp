@@ -175,6 +175,10 @@ void MainWindow::buildUi()
     toolbar->addAction(QStringLiteral("A−"), this, &MainWindow::decreaseFont);
     toolbar->addAction(QStringLiteral("A+"), this, &MainWindow::increaseFont);
     toolbar->addAction(QStringLiteral("◐ テーマ"), this, &MainWindow::cycleTheme);
+    QAction *xmlAction = toolbar->addAction(QStringLiteral("</> XML"));
+    xmlAction->setCheckable(true);
+    xmlAction->setToolTip(QStringLiteral("章の XHTML ソースを表示"));
+    connect(xmlAction, &QAction::toggled, this, &MainWindow::toggleXmlView);
 
     m_location = new QLabel(QStringLiteral("No book loaded"), this);
     statusBar()->addWidget(m_location);
@@ -399,6 +403,23 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     m_currentChapter = index;
     const Chapter &chapter = m_book->chapters().at(index);
 
+    // Raw XHTML source view: render the chapter markup as escaped monospace text.
+    if (m_xmlView) {
+        const QString raw = m_book->readText(chapter.path).toHtmlEscaped();
+        const QString html =
+            QStringLiteral("<!doctype html><html><head><meta charset=\"utf-8\"><style>"
+                           "html,body{margin:0;} pre{white-space:pre-wrap;word-break:break-word;"
+                           "font-family:Menlo,Consolas,'DejaVu Sans Mono',monospace;font-size:12px;"
+                           "line-height:1.5;padding:16px;margin:0;}</style></head><body><pre>%1"
+                           "</pre></body></html>")
+                .arg(raw);
+        m_view->page()->setBackgroundColor(themeBackground());
+        m_view->setHtml(html);
+        updateLocation();
+        updateNavButtons();
+        return;
+    }
+
     // Make this chapter's highlights / translation mode available to the page
     // before it loads so the injected reader script can act on DocumentReady.
     ++m_trRunId; // abandon any in-flight translation from the previous chapter
@@ -526,6 +547,13 @@ void MainWindow::cycleTheme()
     m_theme = static_cast<Theme>((static_cast<int>(m_theme) + 1) % 3);
     m_view->page()->setBackgroundColor(themeBackground());
     injectViewStyle();
+}
+
+void MainWindow::toggleXmlView(bool on)
+{
+    m_xmlView = on;
+    if (m_book && m_currentChapter >= 0)
+        displayChapter(m_currentChapter); // re-render in the chosen mode
 }
 
 // --- search ----------------------------------------------------------------
