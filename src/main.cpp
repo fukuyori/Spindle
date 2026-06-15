@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QFileInfo>
+#include <QIcon>
 
 int main(int argc, char *argv[])
 {
@@ -12,6 +13,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Spindle"));
     app.setOrganizationName(QStringLiteral("Spindle"));
+    app.setWindowIcon(QIcon(QStringLiteral(":/spindle.png")));
 
     MainWindow window;
     window.show();

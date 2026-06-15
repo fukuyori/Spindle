@@ -2,5 +2,6 @@
 <RCC version="1.0">
   <qresource prefix="/">
     <file>reader.js</file>
+    <file>spindle.png</file>
   </qresource>
 </RCC>

@@ -30,7 +30,19 @@ add_library(miniz STATIC third_party/miniz/miniz.c)
 target_include_directories(miniz PUBLIC third_party/miniz)
 
 # --- application ----------------------------------------------------------
+# Platform app-icon sources.
+set(SPINDLE_ICON_SOURCES "")
+if(APPLE)
+  set(SPINDLE_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/spindle.icns")
+  set_source_files_properties("${SPINDLE_MACOS_ICON}" PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources")
+  list(APPEND SPINDLE_ICON_SOURCES "${SPINDLE_MACOS_ICON}")
+elseif(WIN32)
+  list(APPEND SPINDLE_ICON_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/resources/spindle.rc")
+endif()
+
 qt_add_executable(spindle
+  ${SPINDLE_ICON_SOURCES}
   src/main.cpp
   src/epub/ZipArchive.cpp
   src/epub/ZipArchive.h
@@ -83,6 +95,7 @@ if(APPLE)
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.spindle.reader"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_ICON_FILE "spindle.icns"
   )
 endif()
 
