@@ -15,7 +15,7 @@ OllamaClient::OllamaClient(QObject *parent)
 
 void OllamaClient::translate(const QString &endpoint, const QString &model,
                              const QString &targetLang, const QString &text,
-                             const QString &glossary)
+                             const QString &glossary, int requestId)
 {
     QString base = endpoint.trimmed();
     while (base.endsWith(QLatin1Char('/')))
@@ -49,10 +49,10 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, url]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url, requestId]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            emit finished(false,
+            emit finished(requestId, false,
                           QStringLiteral("Ollama への接続に失敗しました (%1): %2")
                               .arg(url.toString(), reply->errorString()));
             return;
@@ -65,9 +65,9 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
                                     .toString()
                                     .trimmed();
         if (content.isEmpty()) {
-            emit finished(false, QStringLiteral("Ollama が空の翻訳を返しました"));
+            emit finished(requestId, false, QStringLiteral("Ollama が空の翻訳を返しました"));
             return;
         }
-        emit finished(true, content);
+        emit finished(requestId, true, content);
     });
 }

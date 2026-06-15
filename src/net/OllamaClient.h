@@ -13,11 +13,13 @@ class OllamaClient : public QObject {
 public:
     explicit OllamaClient(QObject *parent = nullptr);
 
+    // `requestId` is echoed back in finished() so the caller can match the reply
+    // to the exact request even when several runs overlap.
     void translate(const QString &endpoint, const QString &model, const QString &targetLang,
-                   const QString &text, const QString &glossary = QString());
+                   const QString &text, const QString &glossary = QString(), int requestId = 0);
 
 signals:
-    void finished(bool ok, const QString &result);
+    void finished(int requestId, bool ok, const QString &result);
 
 private:
     QNetworkAccessManager *m_nam;

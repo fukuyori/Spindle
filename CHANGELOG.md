@@ -4,6 +4,19 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-06-15
+
+### Fixed
+- **Translation cache off-by-one.** When a re-translation run overlapped an
+  in-flight request (e.g. pressing 再翻訳 while a translation was still running),
+  a stale reply could be stored against the current block, shifting every
+  translation by one paragraph. Each Ollama request now carries its own run,
+  block index and source text, so replies are matched exactly and superseded
+  runs are dropped. (Caches written by an earlier version stay shifted — delete
+  the `<book>.epub.spindle.<lang>.json` sidecar and re-translate to rebuild it.)
+- **再翻訳 now actually re-translates** the current chapter, ignoring the cache
+  and overwriting it, instead of reusing cached results.
+
 ## [0.2.0] - 2026-06-15
 
 ### Changed

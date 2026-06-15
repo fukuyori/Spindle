@@ -6,6 +6,7 @@
 #include "model/Highlight.h"
 #include "model/TranslationCache.h"
 
+#include <QHash>
 #include <QMainWindow>
 #include <QPair>
 #include <QString>
@@ -71,8 +72,8 @@ private slots:
                         int length, const QString &text);
     void openTranslateDialog();
     void onBlocksReady(const QString &json);
-    void onOllamaFinished(bool ok, const QString &result);
-    void onSelectionTranslated(bool ok, const QString &result);
+    void onOllamaFinished(int requestId, bool ok, const QString &result);
+    void onSelectionTranslated(int requestId, bool ok, const QString &result);
     void onMarkClicked(const QString &id);
     void exportHighlightsMarkdown();
     void exportHighlightsJson();
@@ -153,10 +154,18 @@ private:
     QVector<QPair<int, QString>> m_trQueue;
     int m_trCursor = 0;
     int m_trRunId = 0;
-    int m_trReqRun = 0;
-    int m_trCurIndex = -1;
-    QString m_trCurText; // source text of the in-flight translation
+    // Each in-flight Ollama request remembers its run, block index and source
+    // text, so a reply from a superseded run can't be misattributed to the
+    // current block (which would shift the cache by one).
+    struct TrRequest {
+        int run = 0;
+        int index = 0;
+        QString text;
+    };
+    QHash<int, TrRequest> m_trReqs;
+    int m_trReqSeq = 0;
     bool m_trAnyOk = false;
+    bool m_trForce = false; // one-shot: 再翻訳 ignores the cache and re-requests
     TranslationCache m_trCache;
     Glossary m_trGlossary;
     QTimer *m_trCacheSave = nullptr;

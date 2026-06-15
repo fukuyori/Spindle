@@ -508,6 +508,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     // before it loads so the injected reader script can act on DocumentReady.
     ++m_trRunId; // abandon any in-flight translation from the previous chapter
     m_trQueue.clear();
+    m_trReqs.clear();
     if (m_bridge) {
         m_bridge->setHighlightsJson(chapterHighlightsJson());
         m_bridge->setTranslateView(translateViewString());
@@ -1082,7 +1083,7 @@ void MainWindow::exportTranslatedEpub(int mode)
             bool ok = false;
             QString out;
             auto conn = connect(&client, &OllamaClient::finished, &loop,
-                                [&](bool o, const QString &r) { ok = o; out = r; loop.quit(); });
+                                [&](int, bool o, const QString &r) { ok = o; out = r; loop.quit(); });
             client.translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), text,
                              m_trGlossary.promptBlock());
             loop.exec();
@@ -1145,23 +1146,31 @@ void MainWindow::setTranslateView(int view)
 void MainWindow::onBlocksReady(const QString &json)
 {
     const QJsonArray arr = QJsonDocument::fromJson(json.toUtf8()).array();
+    // Bump the run so any prior (possibly still in-flight) loop is superseded and
+    // two onBlocksReady calls can't drive two interleaved queues at once.
+    ++m_trRunId;
+    const int run = m_trRunId;
     m_trQueue.clear();
+    const bool force = m_trForce; // 再翻訳: redo every block, overwriting the cache
+    m_trForce = false;
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         const int index = o.value(QStringLiteral("index")).toInt();
         const QString text = o.value(QStringLiteral("text")).toString();
-        // Cache hit → apply instantly without calling Ollama.
-        const QString cached = m_trCache.lookup(text);
-        if (!cached.isEmpty()) {
-            if (m_bridge)
-                m_bridge->applyTranslation(index, cached, QString());
-            continue;
+        // Cache hit → apply instantly without calling Ollama (unless re-translating).
+        if (!force) {
+            const QString cached = m_trCache.lookup(text);
+            if (!cached.isEmpty()) {
+                if (m_bridge)
+                    m_bridge->applyTranslation(index, cached, QString());
+                continue;
+            }
         }
         m_trQueue.append({index, text});
     }
     m_trCursor = 0;
     m_trAnyOk = false;
-    translateNext(m_trRunId);
+    translateNext(run);
 }
 
 void MainWindow::translateNext(int run)
@@ -1171,30 +1180,34 @@ void MainWindow::translateNext(int run)
     if (m_trCursor >= m_trQueue.size())
         return;
     const auto &item = m_trQueue.at(m_trCursor);
-    m_trCurIndex = item.first;
-    m_trCurText = item.second;
-    m_trReqRun = run;
+    const int reqId = ++m_trReqSeq;
+    m_trReqs.insert(reqId, {run, item.first, item.second});
     if (m_bridge)
-        m_bridge->applyTranslation(m_trCurIndex, QStringLiteral("翻訳中…"),
+        m_bridge->applyTranslation(item.first, QStringLiteral("翻訳中…"),
                                    QStringLiteral("pending"));
     m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), item.second,
-                        m_trGlossary.promptBlock());
+                        m_trGlossary.promptBlock(), reqId);
 }
 
-void MainWindow::onOllamaFinished(bool ok, const QString &result)
+void MainWindow::onOllamaFinished(int requestId, bool ok, const QString &result)
 {
-    if (m_trReqRun != m_trRunId)
-        return; // stale reply (chapter/mode changed)
+    const auto it = m_trReqs.find(requestId);
+    if (it == m_trReqs.end())
+        return; // unknown / already handled
+    const TrRequest req = it.value();
+    m_trReqs.erase(it);
+    if (req.run != m_trRunId)
+        return; // stale reply from a superseded run — drop, don't advance
 
     if (ok) {
         m_trAnyOk = true;
-        m_trCache.put(m_trCurText, result); // remember for next time / export
+        m_trCache.put(req.text, result); // key = this block's text (never the next's)
         m_trCacheSave->start();
         if (m_bridge)
-            m_bridge->applyTranslation(m_trCurIndex, result, QString());
+            m_bridge->applyTranslation(req.index, result, QString());
     } else {
         if (m_bridge)
-            m_bridge->applyTranslation(m_trCurIndex,
+            m_bridge->applyTranslation(req.index,
                                        QStringLiteral("⚠ 翻訳に失敗しました: ") + result,
                                        QStringLiteral("error"));
         // A failure before any success usually means Ollama is unreachable —
@@ -1205,7 +1218,7 @@ void MainWindow::onOllamaFinished(bool ok, const QString &result)
         }
     }
     ++m_trCursor;
-    translateNext(m_trRunId);
+    translateNext(req.run);
 }
 
 void MainWindow::translateSelection(const QString &text)
@@ -1218,8 +1231,9 @@ void MainWindow::translateSelection(const QString &text)
                                  m_trGlossary.promptBlock());
 }
 
-void MainWindow::onSelectionTranslated(bool ok, const QString &result)
+void MainWindow::onSelectionTranslated(int requestId, bool ok, const QString &result)
 {
+    Q_UNUSED(requestId);
     if (!m_translatePopup || !m_translatePopup->isVisible())
         return;
     showTranslatePopup(ok ? result : QStringLiteral("⚠ 翻訳に失敗しました: ") + result);
@@ -1308,8 +1322,9 @@ void MainWindow::openTranslateDialog()
         settings.setValue(QStringLiteral("translate/endpoint"), m_trEndpoint);
         if (m_translateView == TranslateView::Original)
             m_translateView = TranslateView::Bilingual;
+        m_trForce = true; // 再翻訳: redo the translation rather than reusing the cache
         if (m_currentChapter >= 0)
-            displayChapter(m_currentChapter); // reload clean, then auto-translate
+            displayChapter(m_currentChapter); // reload clean, then re-translate
     });
     Q_UNUSED(retranslate);
 

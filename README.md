@@ -189,11 +189,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.2.0` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.2.1` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.2.1 && git push origin v0.2.1
 ```
 
 ## Project layout
