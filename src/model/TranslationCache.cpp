@@ -15,8 +15,11 @@ QString TranslationCache::filePath() const
 {
     if (m_epubPath.isEmpty() || m_lang.isEmpty())
         return {};
-    // Sidecar file next to the EPUB: <epubPath>.spindle.<lang>.json
-    return m_epubPath + QStringLiteral(".spindle.") + m_lang + QStringLiteral(".json");
+    // Sidecar next to the EPUB: <book>.<lang>.json  (e.g. book.epub -> book.ja.json)
+    QString base = m_epubPath;
+    if (base.endsWith(QLatin1String(".epub"), Qt::CaseInsensitive))
+        base.chop(5);
+    return base + QLatin1Char('.') + m_lang + QStringLiteral(".json");
 }
 
 void TranslationCache::load(const QString &epubPath, const QString &lang)

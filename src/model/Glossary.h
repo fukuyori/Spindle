@@ -4,7 +4,7 @@
 #include <QVector>
 
 // Per-book translation glossary, stored as a sidecar next to the EPUB:
-//   <epubPath>.glossary.json
+//   <book>.glossary.json   (e.g. book.epub -> book.glossary.json)
 // Format (one source->target language pair per file):
 //   {
 //     "source_lang": "la",

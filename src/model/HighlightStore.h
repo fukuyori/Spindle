@@ -8,7 +8,7 @@
 
 // Per-book highlight persistence + JSON (de)serialization.
 // Highlights are stored as a sidecar file next to the EPUB:
-//   <epubPath>.spindle.highlights.json
+//   <book>.highlights.json   (e.g. book.epub -> book.highlights.json)
 // using the BookHighlightFile shape (version 2) shared with import/export.
 namespace highlight_store {
 

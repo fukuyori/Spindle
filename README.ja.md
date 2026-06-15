@@ -32,7 +32,7 @@ Windows / macOS / Linux に対応します。
   （原文 / 対訳併記 / 訳文）に加え、選択範囲だけをその場で翻訳。モデル・翻訳先
   言語・エンドポイントを設定可能。訳文の文字色を選択でき、章翻訳は最大2件を並行
   実行。翻訳結果は**本・言語ごとに** EPUB の隣にキャッシュするので再読は即時。
-- **翻訳用語集** — 任意の `<本>.epub.glossary.json` で、指定した用語（人名・専門
+- **翻訳用語集** — 任意の `<本>.glossary.json` で、指定した用語（人名・専門
   用語など）の訳語を固定し、翻訳の表記ゆれを抑えます。
 - **翻訳 EPUB 書き出し** — キャッシュから**対訳／訳文の `.epub`** を生成（未翻訳
   段落は書き出し時に翻訳）。出力の言語メタデータは翻訳先言語に設定。
@@ -63,6 +63,15 @@ Windows / macOS / Linux に対応します。
   その選択範囲だけを翻訳します（結果ポップアップは Escape か外側クリックで閉じる）。
   選択したモデルがインストール済みの Ollama が起動している必要があります
   （既定モデルは `qwen2.5`）。
+  - **並行翻訳**：章の翻訳は最大2件を同時に投げますが、速くなるのは Ollama サーバが
+    並行処理を許可している場合だけです。macOS の Ollama アプリは
+    `OLLAMA_NUM_PARALLEL=1` のことが多く（`launchctl setenv` も確実には反映されません）。
+    有効にするにはアプリを終了し、変数を付けて自分でサーバを起動します:
+    ```sh
+    OLLAMA_NUM_PARALLEL=2 ollama serve
+    ```
+    Spindle 側は既定の `http://localhost:11434` のままで動きます。GPU が1枚の場合は
+    2つのリクエストが同じ GPU を共有するため、効果は2倍ではなく部分的です。
 - **翻訳した本の書き出し**：**翻訳 → 対訳 EPUB を書き出し／訳文 EPUB を書き出し**
   で、キャッシュした翻訳から新しい `.epub` を生成します（未翻訳の段落は書き出し時に
   翻訳。進捗ダイアログでキャンセル可）。
@@ -72,16 +81,18 @@ Windows / macOS / Linux に対応します。
 
 本ごとのデータは、アプリのデータフォルダではなく `.epub` と同じフォルダに保存されます:
 
+`Foo.epub` の場合、ベース名 `Foo` を使ったファイル名になります:
+
 | ファイル | 内容 |
 |----------|------|
-| `<本>.epub.spindle.highlights.json` | ハイライトとノート |
-| `<本>.epub.spindle.<lang>.json` | 翻訳キャッシュ（言語ごと） |
-| `<本>.epub.glossary.json` | 用語集（任意・自分で作成／編集） |
+| `<本>.highlights.json` | ハイライトとノート |
+| `<本>.<lang>.json` | 翻訳キャッシュ（言語ごと。例 `Foo.ja.json`） |
+| `<本>.glossary.json` | 用語集（任意・自分で作成／編集） |
 
 #### 用語集の書式
 
-本と同じフォルダに `<本>.epub.glossary.json` を作成します（`Changeling.epub` なら
-`Changeling.epub.glossary.json`）。1ファイルにつき1つの「原語→訳語」言語ペアを持ち、
+本と同じフォルダに `<本>.glossary.json` を作成します（`Changeling.epub` なら
+`Changeling.glossary.json`）。1ファイルにつき1つの「原語→訳語」言語ペアを持ち、
 指定した用語の訳し方を固定します:
 
 ```json
@@ -179,11 +190,11 @@ pwsh scripts/package-windows.ps1 -QtPrefix ...   # → 携帯版 .zip（NSIS が
 - **macOS** → `.dmg`
 - **Windows** → 携帯版 `.zip` + NSIS `setup.exe`
 
-各実行で成果物がアップロードされます。`v0.2.2` のようなタグを push すると、
+各実行で成果物がアップロードされます。`v0.2.3` のようなタグを push すると、
 全パッケージを添付した GitHub Release も自動作成されます。
 
 ```sh
-git tag v0.2.2 && git push origin v0.2.2
+git tag v0.2.3 && git push origin v0.2.3
 ```
 
 ## プロジェクト構成

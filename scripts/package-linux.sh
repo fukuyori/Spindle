@@ -64,6 +64,17 @@ prefix="${CMAKE_PREFIX_PATH:-}"
 [ -n "$prefix" ] && export PATH="$prefix/bin:$PATH"
 export QML_SOURCES_PATHS="$ROOT"
 
+# An EPUB reader needs no geolocation. Qt WebEngine drags in QtPositioning, whose
+# position plugins (notably NMEA) link Qt SerialPort, which we don't ship — that
+# breaks linuxdeploy. Drop the position plugins from the kit before deploying;
+# libQt6Positioning itself is still bundled as a WebEngine dependency.
+qt_plugins="$(qmake -query QT_INSTALL_PLUGINS 2>/dev/null || qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+[ -z "$qt_plugins" ] && [ -n "$prefix" ] && qt_plugins="$prefix/plugins"
+if [ -n "$qt_plugins" ] && [ -d "$qt_plugins/position" ]; then
+  echo "==> Removing position plugins (no geolocation needed): $qt_plugins/position"
+  rm -rf "$qt_plugins/position"
+fi
+
 echo "==> Building AppImage"
 ( cd "$DIST_DIR" && OUTPUT="Spindle-$VERSION-x86_64.AppImage" \
     "$LD" --appdir "$APPDIR" --plugin qt \

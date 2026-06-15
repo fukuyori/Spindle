@@ -10,7 +10,11 @@ QString filePathFor(const QString &epubPath)
 {
     if (epubPath.isEmpty())
         return {};
-    return epubPath + QStringLiteral(".spindle.highlights.json");
+    // Sidecar next to the EPUB: <book>.highlights.json
+    QString base = epubPath;
+    if (base.endsWith(QLatin1String(".epub"), Qt::CaseInsensitive))
+        base.chop(5);
+    return base + QStringLiteral(".highlights.json");
 }
 
 QJsonObject toJson(const Highlight &h)

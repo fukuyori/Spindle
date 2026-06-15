@@ -6,7 +6,7 @@
 // Per-book, per-target-language cache of paragraph translations. Keyed by the
 // whitespace-normalized source text so it survives reloads and matches blocks
 // regardless of incidental whitespace. Persisted as a JSON sidecar file next to
-// the EPUB: <epubPath>.spindle.<lang>.json.
+// the EPUB: <book>.<lang>.json (e.g. book.epub -> book.ja.json).
 class TranslationCache {
 public:
     // Collapse whitespace runs to single spaces and trim (the cache key form).

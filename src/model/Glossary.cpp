@@ -11,7 +11,10 @@ void Glossary::load(const QString &epubPath, const QString &lang)
     if (epubPath.isEmpty() || lang.isEmpty())
         return;
 
-    QFile f(epubPath + QStringLiteral(".glossary.json"));
+    QString base = epubPath; // <book>.glossary.json  (e.g. book.epub -> book.glossary.json)
+    if (base.endsWith(QLatin1String(".epub"), Qt::CaseInsensitive))
+        base.chop(5);
+    QFile f(base + QStringLiteral(".glossary.json"));
     if (!f.open(QIODevice::ReadOnly))
         return;
     const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();

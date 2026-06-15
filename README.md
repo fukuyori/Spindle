@@ -39,7 +39,7 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   paragraphs can be tinted a chosen color, and chapter translation runs up to two
   requests in parallel. Results are **cached per book and language** next to the
   EPUB, so re-reading is instant.
-- **Translation glossary** — an optional `<book>.epub.glossary.json` fixes the
+- **Translation glossary** — an optional `<book>.glossary.json` fixes the
   target wording of chosen terms (names, jargon) for consistent translations.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
   from the cache (missing paragraphs are translated on export); the output's
@@ -72,6 +72,16 @@ in a new window, so you can read several at once.
   text and choose **🌐 翻訳** to translate just that selection (the result popup
   closes on Escape or an outside click). Requires a running Ollama instance with
   the chosen model installed (default `qwen2.5`).
+  - **Parallel translation:** chapter translation sends up to 2 requests at once,
+    but the speedup only applies if the Ollama server allows parallelism. The
+    macOS Ollama app often runs with `OLLAMA_NUM_PARALLEL=1` (and doesn't reliably
+    pick up `launchctl setenv`). To enable it, quit the app and start the server
+    yourself with the variable set:
+    ```sh
+    OLLAMA_NUM_PARALLEL=2 ollama serve
+    ```
+    Spindle's default endpoint `http://localhost:11434` then works unchanged. On a
+    single GPU the gain is partial (both requests share it), not a full 2×.
 - **Export a translated book:** **翻訳 → 対訳 EPUB を書き出し / 訳文 EPUB を書き出し**
   builds a new `.epub` from the cached translations (any not-yet-translated
   paragraphs are translated first, with a cancelable progress dialog).
@@ -81,16 +91,18 @@ in a new window, so you can read several at once.
 
 Per-book data is written next to the `.epub` (not in an app data directory):
 
+For a book `Foo.epub`, files are named after the base name `Foo`:
+
 | File | Contents |
 |------|----------|
-| `<book>.epub.spindle.highlights.json` | highlights & notes |
-| `<book>.epub.spindle.<lang>.json` | translation cache for a target language |
-| `<book>.epub.glossary.json` | optional glossary (you create/edit this) |
+| `<book>.highlights.json` | highlights & notes |
+| `<book>.<lang>.json` | translation cache for a target language (e.g. `Foo.ja.json`) |
+| `<book>.glossary.json` | optional glossary (you create/edit this) |
 
 #### Glossary format
 
-Create `<book>.epub.glossary.json` next to the book (for `Changeling.epub`, the
-file is `Changeling.epub.glossary.json`). One file holds a single
+Create `<book>.glossary.json` next to the book (for `Changeling.epub`, the
+file is `Changeling.glossary.json`). One file holds a single
 source→target language pair and fixes how chosen terms are translated:
 
 ```json
@@ -187,11 +199,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.2.2` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.2.3` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.2.2 && git push origin v0.2.2
+git tag v0.2.3 && git push origin v0.2.3
 ```
 
 ## Project layout

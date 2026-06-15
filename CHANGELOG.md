@@ -4,6 +4,21 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-06-15
+
+### Changed
+- **Sidecar file names shortened** — the `.epub` and `.spindle` parts were
+  dropped, so for `Foo.epub` the files are now `Foo.highlights.json`,
+  `Foo.<lang>.json` (e.g. `Foo.ja.json`), and `Foo.glossary.json`. Old-named
+  files are not migrated automatically; rename them to the new scheme to keep
+  existing highlights, caches, and glossaries.
+
+### Fixed
+- **Linux AppImage build** — Qt WebEngine pulls in QtPositioning, whose NMEA
+  position plugin links Qt SerialPort and broke `linuxdeploy`. The position
+  plugins (geolocation, unused by a reader) are now excluded from the AppImage;
+  `libQt6Positioning` itself is still bundled as a WebEngine dependency.
+
 ## [0.2.2] - 2026-06-15
 
 ### Added
