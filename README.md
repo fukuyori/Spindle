@@ -34,9 +34,14 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   inlined as data URIs).
 - **Local AI translation** via [Ollama](https://ollama.com) — whole-chapter
   modes (original / bilingual / translation-only) plus on-the-spot translation
-  of a selection; configurable model, target language and endpoint.
+  of a selection; configurable model, target language and endpoint. Results are
+  **cached per book and language** (persisted to disk), so re-reading is instant.
+- **Translated EPUB export** — generate a bilingual or translation-only `.epub`
+  from the cache (missing paragraphs are translated on export); the output's
+  language metadata is set to the target language.
 - **XHTML source view** — toggle the current chapter between the rendered view
   and its raw markup.
+- **Comfortable reading margins** and a collapsible sidebar.
 - **Multiple books at once** — each EPUB opens in its own window.
 - **Drag-and-drop**, command-line arguments, and "open with" file opening.
 
@@ -60,6 +65,9 @@ its own window, so you can read several at once.
   text and choose **🌐 翻訳** to translate just that selection (the result popup
   closes on Escape or an outside click). Requires a running Ollama instance with
   the chosen model installed (default `qwen2.5`).
+- **Export a translated book:** **翻訳 → 対訳 EPUB を書き出し / 訳文 EPUB を書き出し**
+  builds a new `.epub` from the cached translations (any not-yet-translated
+  paragraphs are translated first, with a cancelable progress dialog).
 - **Source view:** the **</> XML** button shows the chapter's raw XHTML.
 
 ## Build
@@ -127,11 +135,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.1.2` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.1.3` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.1.2 && git push origin v0.1.2
+git tag v0.1.3 && git push origin v0.1.3
 ```
 
 ## Project layout

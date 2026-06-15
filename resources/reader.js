@@ -21,6 +21,9 @@
       acceptNode: function (node) {
         var p = node.parentElement;
         if (p && p.closest("mark.spindle-hl")) return NodeFilter.FILTER_REJECT;
+        // Inserted translation paragraphs must NOT count toward offsets, or
+        // highlight positions drift once a chapter is translated (bilingual).
+        if (p && p.closest(".spindle-translation")) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
