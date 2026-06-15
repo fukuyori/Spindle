@@ -21,6 +21,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QChildEvent>
+#include <QCloseEvent>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -54,6 +55,7 @@
 #include <QColorDialog>
 #include <QFontComboBox>
 #include <QSettings>
+#include <QShowEvent>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -174,6 +176,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     buildUi();
     updateNavButtons();
     updateSidebarMode();
+
+    // Reopen at the last window size/position (falls back to the resize() above).
+    const QByteArray geo = QSettings().value(QStringLiteral("window/geometry")).toByteArray();
+    if (!geo.isEmpty())
+        restoreGeometry(geo);
 }
 
 MainWindow::~MainWindow()
@@ -181,6 +188,22 @@ MainWindow::~MainWindow()
     m_trCache.flush();
     EpubSchemeHandler::instance()->unregisterBook(m_schemeId);
     --g_windowCount;
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    QSettings().setValue(QStringLiteral("window/geometry"), saveGeometry());
+    QMainWindow::closeEvent(event);
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    // Put keyboard focus on the reading view (not the search box), so Space/arrow
+    // navigation works immediately. Deferred so the web view's render widget,
+    // which is created lazily, exists by the time we focus it.
+    if (m_view)
+        QTimer::singleShot(0, m_view, [this] { if (m_view) m_view->setFocus(); });
 }
 
 MainWindow *MainWindow::openInNewWindow(const QString &filePath)
@@ -383,6 +406,12 @@ void MainWindow::setupWebChannel()
     m_trEndpoint = settings.value(QStringLiteral("translate/endpoint"), m_trEndpoint).toString();
     m_trColor = settings.value(QStringLiteral("translate/color")).toString();
 
+    // Restore the theme and translation view used last time.
+    m_theme = static_cast<Theme>(
+        qBound(0, settings.value(QStringLiteral("view/theme"), 0).toInt(), 2));
+    m_translateView = static_cast<TranslateView>(
+        qBound(0, settings.value(QStringLiteral("translate/view"), 0).toInt(), 2));
+
     // Restore the font choice without firing the change handlers (which would
     // persist defaults). injectViewStyle runs on each chapter load.
     const bool fontOn = settings.value(QStringLiteral("font/override"), false).toBool();
@@ -584,6 +613,8 @@ void MainWindow::onLoadFinished(bool ok)
         if (m_bridge)
             m_bridge->requestScrollToHighlight(id); // reader.js retries until the mark exists
     }
+    if (m_view)
+        m_view->setFocus(); // keep keyboard focus on the reading pane after a load
 }
 
 void MainWindow::applyZoom()
@@ -723,6 +754,7 @@ void MainWindow::decreaseFont() { m_fontSize = qMax(m_fontSize - 10, 50); applyZ
 void MainWindow::cycleTheme()
 {
     m_theme = static_cast<Theme>((static_cast<int>(m_theme) + 1) % 3);
+    QSettings().setValue(QStringLiteral("view/theme"), static_cast<int>(m_theme));
     m_view->page()->setBackgroundColor(themeBackground());
     injectViewStyle();
 }
@@ -1204,8 +1236,34 @@ void MainWindow::exportTranslatedEpub(int mode)
 
 // --- translation -----------------------------------------------------------
 
+// Primary language subtag, lowercased (e.g. "ja-JP" / "ja_JP" -> "ja").
+static QString primaryLangSubtag(const QString &code)
+{
+    QString c = code.trimmed().toLower();
+    const int dash = c.indexOf(QLatin1Char('-'));
+    const int us = c.indexOf(QLatin1Char('_'));
+    int cut = dash;
+    if (us >= 0 && (cut < 0 || us < cut))
+        cut = us;
+    return cut >= 0 ? c.left(cut) : c;
+}
+
+bool MainWindow::isBookLanguage(const QString &targetCode) const
+{
+    if (!m_book)
+        return false;
+    const QString bl = m_book->language();
+    if (bl.isEmpty() || targetCode.isEmpty())
+        return false;
+    return primaryLangSubtag(bl) == primaryLangSubtag(targetCode);
+}
+
 QString MainWindow::translateViewString() const
 {
+    // If the book is already in the target language, translation is a no-op:
+    // always show the original.
+    if (isBookLanguage(m_trTarget))
+        return QStringLiteral("original");
     switch (m_translateView) {
     case TranslateView::Bilingual: return QStringLiteral("bilingual");
     case TranslateView::Translation: return QStringLiteral("translation");
@@ -1217,6 +1275,7 @@ QString MainWindow::translateViewString() const
 void MainWindow::setTranslateView(int view)
 {
     m_translateView = static_cast<TranslateView>(view);
+    QSettings().setValue(QStringLiteral("translate/view"), static_cast<int>(m_translateView));
     ++m_trRunId; // start a fresh translation run for the new mode
     m_trQueue.clear();
     if (m_bridge) {
@@ -1430,6 +1489,20 @@ void MainWindow::openTranslateDialog()
                 injectViewStyle();
             });
 
+    // When the target equals the book's own language, translation is a no-op:
+    // lock the mode to 原文 and disable it. Re-evaluated when the target changes.
+    auto updateModeForLang = [this, modeBox, targetBox]() {
+        const bool same = isBookLanguage(targetBox->currentData().toString());
+        modeBox->setEnabled(!same);
+        QSignalBlocker block(modeBox);
+        modeBox->setCurrentIndex(same ? 0 : static_cast<int>(m_translateView));
+        modeBox->setToolTip(same ? QStringLiteral("本の言語と翻訳先が同じため、原文表示のみです")
+                                 : QString());
+    };
+    updateModeForLang();
+    connect(targetBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [updateModeForLang](int) { updateModeForLang(); });
+
     connect(&dialog, &QDialog::accepted, this, [&]() {
         const QString newTarget = targetBox->currentData().toString();
         m_trModel = modelEdit->text().trimmed().isEmpty() ? QStringLiteral("qwen2.5")
@@ -1447,8 +1520,11 @@ void MainWindow::openTranslateDialog()
         settings.setValue(QStringLiteral("translate/target"), m_trTarget);
         settings.setValue(QStringLiteral("translate/model"), m_trModel);
         settings.setValue(QStringLiteral("translate/endpoint"), m_trEndpoint);
-        if (m_translateView == TranslateView::Original)
+        // 再翻訳 normally upgrades 原文 → 対訳, but not when the book is already in
+        // the target language (translation would be a no-op).
+        if (m_translateView == TranslateView::Original && !isBookLanguage(m_trTarget))
             m_translateView = TranslateView::Bilingual;
+        settings.setValue(QStringLiteral("translate/view"), static_cast<int>(m_translateView));
         m_trForce = true; // 再翻訳: redo the translation rather than reusing the cache
         if (m_currentChapter >= 0)
             displayChapter(m_currentChapter); // reload clean, then re-translate

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.2.3 LANGUAGES C CXX)
+project(Spindle VERSION 0.2.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,6 +105,9 @@ if(APPLE)
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_ICON_FILE "spindle.icns"
   )
+elseif(WIN32)
+  # Build as a GUI (WinMain) app so no console window pops up at launch.
+  set_target_properties(spindle PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
 # --- install / packaging --------------------------------------------------

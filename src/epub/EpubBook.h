@@ -39,6 +39,7 @@ public:
 
     QString title() const { return m_title; }
     QString author() const { return m_author; }
+    QString language() const { return m_language; } // dc:language ("" if absent)
     QString opfDir() const { return m_opfDir; }
     bool verticalRtl() const { return m_verticalRtl; }
 
@@ -64,6 +65,7 @@ private:
     QString m_error;
     QString m_title;
     QString m_author;
+    QString m_language;
     QString m_opfDir;
     bool m_verticalRtl = false;
     QVector<Chapter> m_chapters;

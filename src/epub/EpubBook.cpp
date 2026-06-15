@@ -121,6 +121,7 @@ bool EpubBook::open(const QString &filePath)
     m_opfDir = path_util::dirname(rootfile);
     m_title = textByLocalName(opf, QStringLiteral("title"));
     m_author = textByLocalName(opf, QStringLiteral("creator"));
+    m_language = textByLocalName(opf, QStringLiteral("language"));
 
     // --- manifest ---
     QHash<QString, ManifestItem> manifest;

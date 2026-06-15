@@ -50,6 +50,8 @@ protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void closeEvent(QCloseEvent *event) override; // persist window geometry
+    void showEvent(QShowEvent *event) override;    // focus the reading pane
     // The central QWebEngineView consumes drops over the page area, so we filter
     // its internal child widgets to catch EPUB drops there too.
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -120,6 +122,9 @@ private:
     void setTranslateView(int view); // 0 original, 1 bilingual, 2 translation
     void translateNext(int run);
     QString translateViewString() const;
+    // True when the book's own language matches `targetCode` (primary subtag),
+    // i.e. translating it into that language is a no-op.
+    bool isBookLanguage(const QString &targetCode) const;
     void translateSelection(const QString &text);
     void showTranslatePopup(const QString &text);
 

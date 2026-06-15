@@ -4,6 +4,22 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] - 2026-06-16
+
+### Added
+- **Session restore** — the theme, window size/position, and translation view
+  used last time are restored on startup.
+
+### Changed
+- **No self-translation** — when the book's own language (`dc:language`) matches
+  the translation target, the view is locked to the original and the mode can't
+  be changed in the translate dialog (re-enabled once a different target is
+  chosen).
+- **Windows: no console window** — the app is built as a GUI (WinMain)
+  executable, so no terminal window appears at launch.
+- **Reading pane gets keyboard focus** on launch and after each chapter load
+  (instead of the search box), so scrolling/paging works immediately.
+
 ## [0.2.3] - 2026-06-15
 
 ### Changed

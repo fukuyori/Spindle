@@ -20,7 +20,8 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   vertical & horizontal layouts, publisher CSS, embedded fonts and images.
 - **Reading controls** — chapter navigation, font zoom, a font picker that can
   override the book's own fonts, light / sepia / dark themes, and a collapsible
-  table-of-contents sidebar.
+  table-of-contents sidebar. The theme, window size, and translation view are
+  restored on the next launch.
 - **Full-text search** across the whole book with chapter-grouped snippets and
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
@@ -38,7 +39,8 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   of a selection; configurable model, target language and endpoint. Translation
   paragraphs can be tinted a chosen color, and chapter translation runs up to two
   requests in parallel. Results are **cached per book and language** next to the
-  EPUB, so re-reading is instant.
+  EPUB, so re-reading is instant. When the book is already in the target language
+  the view stays original (translation is disabled).
 - **Translation glossary** — an optional `<book>.glossary.json` fixes the
   target wording of chosen terms (names, jargon) for consistent translations.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
@@ -199,11 +201,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.2.3` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.2.4` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.2.3 && git push origin v0.2.3
+git tag v0.2.4 && git push origin v0.2.4
 ```
 
 ## Project layout
