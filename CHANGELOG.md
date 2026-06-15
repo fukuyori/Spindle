@@ -4,6 +4,24 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-06-15
+
+### Added
+- **Font picker** — a toolbar font selector with an "適用" toggle overrides the
+  book's own fonts with a chosen family (per all three views); the choice is
+  remembered.
+- **Translation text color** — pick the color of translation paragraphs in the
+  translate dialog (theme-aware presets or a custom color); applies live, the
+  original keeps the theme color.
+- **Parallel translation** — up to 2 Ollama requests run concurrently instead of
+  one at a time. (Requires the Ollama server to allow parallelism, e.g.
+  `OLLAMA_NUM_PARALLEL=2`.)
+
+### Changed
+- **Glossary format** simplified to one source→target pair per file:
+  `{ "source_lang", "target_lang", "entries": [ { "src", "dst", "note" } ] }`.
+  The glossary applies only when `target_lang` matches the current target.
+
 ## [0.2.1] - 2026-06-15
 
 ### Fixed

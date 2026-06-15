@@ -15,6 +15,7 @@
 
 class EpubBook;
 class EpubSchemeHandler;
+class QFontComboBox;
 class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
@@ -84,6 +85,8 @@ private slots:
 
 private:
     void buildUi();
+    void applyFontChoice(); // read the font picker, persist, and re-inject CSS
+    QString translationColor() const; // resolve m_trColor for the current theme ("" = none)
     static bool mimeHasEpub(const class QMimeData *mime);
     void openEpubsFromMime(const class QMimeData *mime);
     void populateToc();
@@ -130,6 +133,7 @@ private:
     int m_fontSize = 100; // percent (zoom)
     Theme m_theme = Theme::Light;
     bool m_xmlView = false; // show raw chapter source instead of rendered view
+    QString m_fontFamily;   // body font override ("" = use the book's own fonts)
 
     QVector<ChapterText> m_chapterTexts;
     bool m_chapterTextsReady = false;
@@ -151,8 +155,10 @@ private:
     QString m_trTarget = QStringLiteral("ja");
     QString m_trModel = QStringLiteral("qwen2.5");
     QString m_trEndpoint = QStringLiteral("http://localhost:11434");
+    QString m_trColor; // translation text color: ""=none, preset key, or "#rrggbb"
     QVector<QPair<int, QString>> m_trQueue;
-    int m_trCursor = 0;
+    int m_trCursor = 0;     // next queue index to dispatch
+    int m_trInFlight = 0;   // requests currently awaiting a reply (current run)
     int m_trRunId = 0;
     // Each in-flight Ollama request remembers its run, block index and source
     // text, so a reply from a superseded run can't be misattributed to the
@@ -177,6 +183,8 @@ private:
     QPushButton *m_tabToc = nullptr;
     QPushButton *m_tabHighlights = nullptr;
     QLineEdit *m_searchInput = nullptr;
+    QFontComboBox *m_fontCombo = nullptr;
+    QAction *m_fontOverride = nullptr;
     QLabel *m_titleLabel = nullptr;
     QLabel *m_authorLabel = nullptr;
     QLabel *m_location = nullptr;

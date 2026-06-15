@@ -15,12 +15,20 @@ void Glossary::load(const QString &epubPath, const QString &lang)
     if (!f.open(QIODevice::ReadOnly))
         return;
     const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
-    const QJsonArray arr = root.value(QStringLiteral("langs")).toObject().value(lang).toArray();
+
+    // The file is for one source→target pair. Only apply it when its target
+    // language matches the language we're translating into (a missing
+    // target_lang is treated as "applies to any target").
+    const QString fileTarget = root.value(QStringLiteral("target_lang")).toString().trimmed();
+    if (!fileTarget.isEmpty() && fileTarget != lang)
+        return;
+
+    const QJsonArray arr = root.value(QStringLiteral("entries")).toArray();
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         Entry e;
-        e.source = o.value(QStringLiteral("source")).toString().trimmed();
-        e.target = o.value(QStringLiteral("target")).toString().trimmed();
+        e.source = o.value(QStringLiteral("src")).toString().trimmed();
+        e.target = o.value(QStringLiteral("dst")).toString().trimmed();
         e.note = o.value(QStringLiteral("note")).toString();
         if (!e.source.isEmpty() && !e.target.isEmpty())
             m_entries.append(e);

@@ -5,16 +5,15 @@
 
 // Per-book translation glossary, stored as a sidecar next to the EPUB:
 //   <epubPath>.glossary.json
-// Format:
+// Format (one source->target language pair per file):
 //   {
-//     "version": 1,
-//     "langs": {
-//       "ja": [ { "source": "Changeling", "target": "チェンジリング", "note": "name" } ],
-//       "en": [ ... ]
-//     }
+//     "source_lang": "la",
+//     "target_lang": "ja",
+//     "entries": [ { "src": "Caesar", "dst": "カエサル", "note": "name" } ]
 //   }
-// Entries for the active target language are turned into an instruction block
-// appended to the translation system prompt (soft enforcement by the model).
+// The glossary is applied only when its target_lang matches the language being
+// translated into. Entries become an instruction block appended to the
+// translation system prompt (soft enforcement by the model).
 class Glossary {
 public:
     struct Entry {

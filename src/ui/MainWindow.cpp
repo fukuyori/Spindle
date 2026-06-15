@@ -51,6 +51,8 @@
 #include <iterator>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QColorDialog>
+#include <QFontComboBox>
 #include <QSettings>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -253,6 +255,19 @@ void MainWindow::buildUi()
     xmlAction->setToolTip(QStringLiteral("章の XHTML ソースを表示"));
     connect(xmlAction, &QAction::toggled, this, &MainWindow::toggleXmlView);
 
+    toolbar->addSeparator();
+    m_fontCombo = new QFontComboBox(this);
+    m_fontCombo->setMaximumWidth(170);
+    m_fontCombo->setToolTip(QStringLiteral("本文フォント（「適用」で本のフォントを上書き）"));
+    toolbar->addWidget(m_fontCombo);
+    m_fontOverride = toolbar->addAction(QStringLiteral("適用"));
+    m_fontOverride->setCheckable(true);
+    m_fontOverride->setToolTip(
+        QStringLiteral("選択したフォントを本文に適用（オフで本のフォントに戻す）"));
+    connect(m_fontCombo, &QFontComboBox::currentFontChanged, this,
+            [this] { applyFontChoice(); });
+    connect(m_fontOverride, &QAction::toggled, this, [this] { applyFontChoice(); });
+
     m_location = new QLabel(QStringLiteral("No book loaded"), this);
     statusBar()->addWidget(m_location);
 
@@ -366,6 +381,21 @@ void MainWindow::setupWebChannel()
     m_trTarget = settings.value(QStringLiteral("translate/target"), m_trTarget).toString();
     m_trModel = settings.value(QStringLiteral("translate/model"), m_trModel).toString();
     m_trEndpoint = settings.value(QStringLiteral("translate/endpoint"), m_trEndpoint).toString();
+    m_trColor = settings.value(QStringLiteral("translate/color")).toString();
+
+    // Restore the font choice without firing the change handlers (which would
+    // persist defaults). injectViewStyle runs on each chapter load.
+    const bool fontOn = settings.value(QStringLiteral("font/override"), false).toBool();
+    const QString fontFamily = settings.value(QStringLiteral("font/family")).toString();
+    if (m_fontCombo && !fontFamily.isEmpty()) {
+        QSignalBlocker block(m_fontCombo);
+        m_fontCombo->setCurrentFont(QFont(fontFamily));
+    }
+    if (m_fontOverride) {
+        QSignalBlocker block(m_fontOverride);
+        m_fontOverride->setChecked(fontOn);
+    }
+    m_fontFamily = (fontOn && m_fontCombo) ? m_fontCombo->currentFont().family() : QString();
 
     auto readResource = [](const QString &path) {
         QFile f(path);
@@ -509,6 +539,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     ++m_trRunId; // abandon any in-flight translation from the previous chapter
     m_trQueue.clear();
     m_trReqs.clear();
+    m_trInFlight = 0;
     if (m_bridge) {
         m_bridge->setHighlightsJson(chapterHighlightsJson());
         m_bridge->setTranslateView(translateViewString());
@@ -593,12 +624,63 @@ void MainWindow::injectViewStyle()
     // horizontal and vertical-rl writing modes). box-sizing keeps them inside.
     css += QStringLiteral(" html{box-sizing:border-box;padding-left:6%;padding-right:6%;}");
 
+    // Optional font override: force the chosen family over the book's own fonts.
+    // Skipped in the raw-XHTML source view (which wants its monospace styling).
+    if (!m_fontFamily.isEmpty() && !m_xmlView) {
+        QString fam = m_fontFamily;
+        fam.remove(QLatin1Char('`')).remove(QLatin1Char('\''))
+            .remove(QLatin1Char('\\'));
+        css += QStringLiteral(" body, body *{ font-family:'%1' !important; }").arg(fam);
+    }
+
+    // Optional translation-text tint (the original keeps the theme color).
+    const QString tc = translationColor();
+    if (!tc.isEmpty())
+        css += QStringLiteral(" .spindle-translation{ color:%1 !important; }").arg(tc);
+
     const QString js = QStringLiteral(
         "(function(){var s=document.getElementById('__spindle_theme');"
         "if(!s){s=document.createElement('style');s.id='__spindle_theme';"
         "document.documentElement.appendChild(s);}s.textContent=`%1`;})();")
         .arg(css);
     m_view->page()->runJavaScript(js);
+}
+
+QString MainWindow::translationColor() const
+{
+    if (m_trColor.isEmpty())
+        return {};
+    if (m_trColor.startsWith(QLatin1Char('#')))
+        return m_trColor; // custom: same color across themes
+    struct Preset {
+        const char *key, *light, *sepia, *dark;
+    };
+    static const Preset presets[] = {
+        {"blue", "#3a5f8a", "#4a6678", "#9db8d6"},
+        {"teal", "#2f6f6a", "#3f6f68", "#8fcfc4"},
+        {"gray", "#5a5a5a", "#6b5d4a", "#a8a8ac"},
+        {"green", "#3a6b45", "#4a6b40", "#9fce9f"},
+    };
+    for (const Preset &p : presets) {
+        if (m_trColor == QLatin1String(p.key))
+            return QString::fromLatin1(m_theme == Theme::Dark    ? p.dark
+                                       : m_theme == Theme::Sepia ? p.sepia
+                                                                 : p.light);
+    }
+    return {};
+}
+
+void MainWindow::applyFontChoice()
+{
+    const bool on = m_fontOverride && m_fontOverride->isChecked();
+    m_fontFamily = (on && m_fontCombo) ? m_fontCombo->currentFont().family() : QString();
+
+    QSettings settings;
+    settings.setValue(QStringLiteral("font/override"), on);
+    if (m_fontCombo)
+        settings.setValue(QStringLiteral("font/family"), m_fontCombo->currentFont().family());
+
+    injectViewStyle();
 }
 
 void MainWindow::updateLocation()
@@ -1169,24 +1251,31 @@ void MainWindow::onBlocksReady(const QString &json)
         m_trQueue.append({index, text});
     }
     m_trCursor = 0;
+    m_trInFlight = 0;
     m_trAnyOk = false;
     translateNext(run);
 }
+
+// Number of Ollama requests kept in flight at once.
+static constexpr int kTranslateConcurrency = 2;
 
 void MainWindow::translateNext(int run)
 {
     if (run != m_trRunId)
         return; // superseded by a newer run
-    if (m_trCursor >= m_trQueue.size())
-        return;
-    const auto &item = m_trQueue.at(m_trCursor);
-    const int reqId = ++m_trReqSeq;
-    m_trReqs.insert(reqId, {run, item.first, item.second});
-    if (m_bridge)
-        m_bridge->applyTranslation(item.first, QStringLiteral("翻訳中…"),
-                                   QStringLiteral("pending"));
-    m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), item.second,
-                        m_trGlossary.promptBlock(), reqId);
+    // Top up to the concurrency limit, dispatching the next queued blocks.
+    while (m_trInFlight < kTranslateConcurrency && m_trCursor < m_trQueue.size()) {
+        const QPair<int, QString> item = m_trQueue.at(m_trCursor);
+        ++m_trCursor;
+        const int reqId = ++m_trReqSeq;
+        m_trReqs.insert(reqId, {run, item.first, item.second});
+        ++m_trInFlight;
+        if (m_bridge)
+            m_bridge->applyTranslation(item.first, QStringLiteral("翻訳中…"),
+                                       QStringLiteral("pending"));
+        m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), item.second,
+                            m_trGlossary.promptBlock(), reqId);
+    }
 }
 
 void MainWindow::onOllamaFinished(int requestId, bool ok, const QString &result)
@@ -1197,7 +1286,8 @@ void MainWindow::onOllamaFinished(int requestId, bool ok, const QString &result)
     const TrRequest req = it.value();
     m_trReqs.erase(it);
     if (req.run != m_trRunId)
-        return; // stale reply from a superseded run — drop, don't advance
+        return; // stale reply from a superseded run — drop, don't touch in-flight
+    --m_trInFlight;
 
     if (ok) {
         m_trAnyOk = true;
@@ -1211,14 +1301,13 @@ void MainWindow::onOllamaFinished(int requestId, bool ok, const QString &result)
                                        QStringLiteral("⚠ 翻訳に失敗しました: ") + result,
                                        QStringLiteral("error"));
         // A failure before any success usually means Ollama is unreachable —
-        // stop rather than spamming every paragraph with the same error.
+        // stop dispatching rather than spamming every paragraph with the error.
         if (!m_trAnyOk) {
             m_trQueue.clear();
             return;
         }
     }
-    ++m_trCursor;
-    translateNext(req.run);
+    translateNext(req.run); // top up the next request(s)
 }
 
 void MainWindow::translateSelection(const QString &text)
@@ -1281,10 +1370,27 @@ void MainWindow::openTranslateDialog()
     QLineEdit *modelEdit = new QLineEdit(m_trModel, &dialog);
     QLineEdit *endpointEdit = new QLineEdit(m_trEndpoint, &dialog);
 
+    QComboBox *colorBox = new QComboBox(&dialog);
+    colorBox->addItem(QStringLiteral("なし（原文と同じ）"), QString());
+    colorBox->addItem(QStringLiteral("藍 / 青"), QStringLiteral("blue"));
+    colorBox->addItem(QStringLiteral("ティール"), QStringLiteral("teal"));
+    colorBox->addItem(QStringLiteral("グレー"), QStringLiteral("gray"));
+    colorBox->addItem(QStringLiteral("緑"), QStringLiteral("green"));
+    const int customIdx = colorBox->count();
+    colorBox->addItem(QStringLiteral("カスタム…"), QStringLiteral("custom"));
+    if (m_trColor.startsWith(QLatin1Char('#'))) {
+        colorBox->setItemText(customIdx, QStringLiteral("カスタム (%1)").arg(m_trColor));
+        colorBox->setCurrentIndex(customIdx);
+    } else {
+        const int i = colorBox->findData(m_trColor);
+        colorBox->setCurrentIndex(i >= 0 ? i : 0);
+    }
+
     form->addRow(QStringLiteral("表示モード"), modeBox);
     form->addRow(QStringLiteral("翻訳先"), targetBox);
     form->addRow(QStringLiteral("モデル"), modelEdit);
     form->addRow(QStringLiteral("エンドポイント"), endpointEdit);
+    form->addRow(QStringLiteral("訳文の色"), colorBox);
 
     QDialogButtonBox *buttons = new QDialogButtonBox(&dialog);
     QPushButton *retranslate = buttons->addButton(QStringLiteral("再翻訳"),
@@ -1302,6 +1408,27 @@ void MainWindow::openTranslateDialog()
     // Mode changes apply live.
     connect(modeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int idx) { setTranslateView(idx); });
+
+    // Translation color applies live (no re-translation needed).
+    connect(colorBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this, colorBox, customIdx](int i) {
+                const QString key = colorBox->itemData(i).toString();
+                if (key == QLatin1String("custom")) {
+                    const QColor init = m_trColor.startsWith(QLatin1Char('#'))
+                                            ? QColor(m_trColor)
+                                            : QColor(QStringLiteral("#3a5f8a"));
+                    const QColor c =
+                        QColorDialog::getColor(init, this, QStringLiteral("訳文の色"));
+                    if (!c.isValid())
+                        return; // cancelled — keep the current color
+                    m_trColor = c.name();
+                    colorBox->setItemText(customIdx, QStringLiteral("カスタム (%1)").arg(m_trColor));
+                } else {
+                    m_trColor = key;
+                }
+                QSettings().setValue(QStringLiteral("translate/color"), m_trColor);
+                injectViewStyle();
+            });
 
     connect(&dialog, &QDialog::accepted, this, [&]() {
         const QString newTarget = targetBox->currentData().toString();

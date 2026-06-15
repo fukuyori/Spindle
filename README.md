@@ -18,8 +18,9 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   nested entries.
 - **Full-fidelity rendering** via Qt WebEngine + the `epub://` scheme:
   vertical & horizontal layouts, publisher CSS, embedded fonts and images.
-- **Reading controls** — chapter navigation, font zoom, light / sepia / dark
-  themes, and a collapsible table-of-contents sidebar.
+- **Reading controls** — chapter navigation, font zoom, a font picker that can
+  override the book's own fonts, light / sepia / dark themes, and a collapsible
+  table-of-contents sidebar.
 - **Full-text search** across the whole book with chapter-grouped snippets and
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
@@ -34,8 +35,10 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   inlined as data URIs).
 - **Local AI translation** via [Ollama](https://ollama.com) — whole-chapter
   modes (original / bilingual / translation-only) plus on-the-spot translation
-  of a selection; configurable model, target language and endpoint. Results are
-  **cached per book and language** next to the EPUB, so re-reading is instant.
+  of a selection; configurable model, target language and endpoint. Translation
+  paragraphs can be tinted a chosen color, and chapter translation runs up to two
+  requests in parallel. Results are **cached per book and language** next to the
+  EPUB, so re-reading is instant.
 - **Translation glossary** — an optional `<book>.epub.glossary.json` fixes the
   target wording of chosen terms (names, jargon) for consistent translations.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
@@ -87,38 +90,33 @@ Per-book data is written next to the `.epub` (not in an app data directory):
 #### Glossary format
 
 Create `<book>.epub.glossary.json` next to the book (for `Changeling.epub`, the
-file is `Changeling.epub.glossary.json`). It fixes how chosen terms are
-translated, per target language:
+file is `Changeling.epub.glossary.json`). One file holds a single
+source→target language pair and fixes how chosen terms are translated:
 
 ```json
 {
-  "version": 1,
-  "langs": {
-    "ja": [
-      { "source": "Changeling", "target": "チェンジリング", "note": "character name" },
-      { "source": "the Order", "target": "教団" }
-    ],
-    "en": [
-      { "source": "妖精", "target": "fae" }
-    ]
-  }
+  "source_lang": "la",
+  "target_lang": "ja",
+  "entries": [
+    { "src": "Caesar", "dst": "カエサル", "note": "name" },
+    { "src": "Gallia", "dst": "ガリア" }
+  ]
 }
 ```
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `version` | yes | format version, currently `1` |
-| `langs` | yes | object keyed by target language code (`ja`, `en`, …) — the same code used as the translation target |
-| `langs.<code>[]` | — | list of term entries for that target language |
-| `source` | yes | the term as it appears in the original text |
-| `target` | yes | the wording to use in the translation |
-| `note` | no | a short hint passed to the model (e.g. `"character name"`) |
+| `source_lang` | no | the original language code (informational) |
+| `target_lang` | yes | target language code (`ja`, `en`, …); the glossary applies only when this matches the language you are translating into |
+| `entries` | yes | list of term mappings |
+| `src` | yes | the term as it appears in the original text |
+| `dst` | yes | the wording to use in the translation |
+| `note` | no | a short hint passed to the model (e.g. `"name"`) |
 
 Notes:
-- The entries for the **current target language** are added to the translation
-  prompt, so each language has its own list; switching the target language loads
-  that language's section.
-- Entries with an empty `source` or `target` are ignored.
+- The glossary is used only when `target_lang` matches the current translation
+  target (a missing `target_lang` applies to any target).
+- Entries with an empty `src` or `dst` are ignored.
 - Enforcement is via the prompt (the model is told to use these translations), so
   it is a strong preference, not a hard substitution — wording may still adapt to
   grammar/inflection. The file is read when the book is opened or the target
@@ -189,11 +187,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.2.1` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.2.2` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.2.1 && git push origin v0.2.1
+git tag v0.2.2 && git push origin v0.2.2
 ```
 
 ## Project layout
