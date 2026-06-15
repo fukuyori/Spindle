@@ -1,0 +1,119 @@
+name: Build & Package
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_VERSION: '6.8.3'
+  QT_MODULES: 'qtwebengine qtwebchannel qtpositioning'
+
+jobs:
+  # ---------------------------------------------------------------- Linux ---
+  linux:
+    runs-on: ubuntu-22.04
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: 1   # CI runners lack FUSE
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build / WebEngine / AppImage dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 \
+            libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 \
+            libasound2 libfuse2 fuse desktop-file-utils
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      - name: Package (AppImage + deb/tgz)
+        run: ./scripts/package-linux.sh
+        env:
+          CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spindle-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- macOS ---
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      - name: Package (.dmg)
+        run: ./scripts/package-macos.sh
+        env:
+          CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spindle-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  # -------------------------------------------------------------- Windows ---
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
+      - name: Install NSIS (for the installer)
+        run: choco install nsis -y --no-progress
+
+      - name: Package (portable zip + installer)
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -QtPrefix $env:QT_ROOT_DIR
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spindle-windows
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+          if-no-files-found: error
+
+  # -------------------------------------------------------------- Release ---
+  release:
+    needs: [linux, macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

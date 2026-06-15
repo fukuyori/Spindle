@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Spindle
+GenericName=EPUB Reader
+Comment=Native EPUB reader with highlights, search and local AI translation
+Exec=spindle %f
+Icon=spindle
+Terminal=false
+Categories=Office;Viewer;Literature;
+MimeType=application/epub+zip;
+StartupWMClass=spindle

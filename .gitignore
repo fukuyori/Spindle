@@ -1,0 +1,16 @@
+# Build / packaging output
+/build/
+/build-*/
+/dist/
+/scripts/.cache/
+
+# Local sample books (personal / copyrighted — do not publish)
+/sample/
+
+# Tooling / logs / local config
+/.claude/
+aqtinstall.log
+*.user
+.DS_Store
+CMakeCache.txt
+CMakeFiles/

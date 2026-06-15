@@ -1,0 +1,147 @@
+#pragma once
+
+#include "core/ChapterText.h"
+#include "epub/EpubBook.h"
+#include "model/Highlight.h"
+
+#include <QMainWindow>
+#include <QPair>
+#include <QString>
+#include <QVector>
+#include <memory>
+
+class EpubBook;
+class EpubSchemeHandler;
+class QLineEdit;
+class QListWidget;
+class QListWidgetItem;
+class QPushButton;
+class QTreeWidget;
+class QTreeWidgetItem;
+class QLabel;
+class QAction;
+class QStackedWidget;
+class QTimer;
+class QWebEngineView;
+class QWebChannel;
+class Bridge;
+class OllamaClient;
+
+class MainWindow : public QMainWindow {
+    Q_OBJECT
+public:
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override;
+
+    bool openEpub(const QString &filePath);
+
+protected:
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+
+private slots:
+    void onOpenTriggered();
+    void onTocItemActivated(QTreeWidgetItem *item, int column);
+    void nextChapter();
+    void previousChapter();
+    void increaseFont();
+    void decreaseFont();
+    void cycleTheme();
+    void onSearchTextChanged();
+    void runSearch();
+    void onSearchResultActivated(QListWidgetItem *item);
+    void onHighlightActivated(QListWidgetItem *item);
+    void showSidebarTab(int tab); // 0 = toc, 1 = highlights
+    void onLoadFinished(bool ok);
+    void onWebSelection(int start, int end, const QString &text);
+    void openTranslateDialog();
+    void onBlocksReady(const QString &json);
+    void onOllamaFinished(bool ok, const QString &result);
+    void onMarkClicked(const QString &id);
+    void exportHighlightsMarkdown();
+    void exportHighlightsJson();
+    void importHighlights();
+    void importKindleNotebook();
+    void exportChapterAozora();
+
+private:
+    void buildUi();
+    void populateToc();
+    void addTocItems(const QVector<TocItem> &items, QTreeWidgetItem *parent);
+    void displayChapter(int index, const QString &fragment = QString());
+    void applyZoom();
+    void injectViewStyle();
+    QColor themeBackground() const;
+    void updateLocation();
+    void updateNavButtons();
+    void updateSidebarMode();
+
+    void ensureChapterTexts();
+
+    // Web channel / highlights
+    void setupWebChannel();
+    QString chapterHighlightsJson() const;
+    void pushHighlightsToView();
+    void createHighlight(HighlightColor color, int start, int end, const QString &selectedText,
+                         const QString &note = QString());
+    void removeHighlightById(const QString &id);
+    void setHighlightColor(const QString &id, HighlightColor color);
+    void editHighlightNote(const QString &id);
+    Highlight *findHighlight(const QString &id);
+    void renderHighlightsList();
+    void persistHighlights();
+    void afterHighlightsMutated();
+
+    // Translation
+    void setTranslateView(int view); // 0 original, 1 bilingual, 2 translation
+    void translateNext(int run);
+    QString translateViewString() const;
+
+    enum class Theme { Light, Sepia, Dark };
+    enum class TranslateView { Original, Bilingual, Translation };
+
+    std::unique_ptr<EpubBook> m_book;
+    QString m_bookId;
+    int m_currentChapter = -1;
+    int m_fontSize = 100; // percent (zoom)
+    Theme m_theme = Theme::Light;
+
+    QVector<ChapterText> m_chapterTexts;
+    bool m_chapterTextsReady = false;
+    QVector<Highlight> m_highlights;
+
+    QString m_pendingFragment;
+    QString m_pendingFind;
+
+    QWebEngineView *m_view = nullptr;
+    EpubSchemeHandler *m_scheme = nullptr;
+    QWebChannel *m_channel = nullptr;
+    Bridge *m_bridge = nullptr;
+    OllamaClient *m_ollama = nullptr;
+
+    TranslateView m_translateView = TranslateView::Original;
+    QString m_trTarget = QStringLiteral("ja");
+    QString m_trModel = QStringLiteral("qwen2.5");
+    QString m_trEndpoint = QStringLiteral("http://localhost:11434");
+    QVector<QPair<int, QString>> m_trQueue;
+    int m_trCursor = 0;
+    int m_trRunId = 0;
+    int m_trReqRun = 0;
+    int m_trCurIndex = -1;
+    bool m_trAnyOk = false;
+    QTreeWidget *m_toc = nullptr;
+    QListWidget *m_highlightsList = nullptr;
+    QListWidget *m_searchResults = nullptr;
+    QStackedWidget *m_sidebarStack = nullptr;
+    QPushButton *m_tabToc = nullptr;
+    QPushButton *m_tabHighlights = nullptr;
+    QLineEdit *m_searchInput = nullptr;
+    QLabel *m_titleLabel = nullptr;
+    QLabel *m_authorLabel = nullptr;
+    QLabel *m_location = nullptr;
+    QAction *m_prevAction = nullptr;
+    QAction *m_nextAction = nullptr;
+    QTimer *m_searchDebounce = nullptr;
+    int m_sidebarTab = 0;
+};
