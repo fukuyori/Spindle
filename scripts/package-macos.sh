@@ -44,37 +44,35 @@ if command -v brew >/dev/null 2>&1; then
 fi
 "$MACDEPLOYQT" "$APP" "${deploy_args[@]}" || true
 
-# macdeployqt doesn't make QtWebChannel reachable from the WebEngine helper
-# process, which then fails to start. Link it into the helper where dyld looks.
-HELPER_FW="$APP/Contents/Frameworks/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/Frameworks"
-if [ -d "$APP/Contents/Frameworks/QtWebChannel.framework" ]; then
-  mkdir -p "$HELPER_FW"
-  ln -sfn "../../../../../../../QtWebChannel.framework" "$HELPER_FW/QtWebChannel.framework"
-fi
+MAIN_FW="$APP/Contents/Frameworks"
 
 # If a stub AGL.framework was needed at link time, bundle it so the app loads.
 STUB_AGL="$BUILD_DIR/.stubfw/AGL.framework"
-if [ -d "$STUB_AGL" ] && [ ! -e "$APP/Contents/Frameworks/AGL.framework" ]; then
-  mkdir -p "$APP/Contents/Frameworks/AGL.framework"
-  cp "$STUB_AGL/AGL" "$APP/Contents/Frameworks/AGL.framework/AGL"
+if [ -d "$STUB_AGL" ] && [ ! -e "$MAIN_FW/AGL.framework" ]; then
+  mkdir -p "$MAIN_FW/AGL.framework"
+  cp "$STUB_AGL/AGL" "$MAIN_FW/AGL.framework/AGL"
+fi
+
+# The WebEngine helper (QtWebEngineProcess) resolves QtWebEngineCore's
+# dependencies via @executable_path/../Frameworks — i.e. its OWN Frameworks dir,
+# NOT the app's. macdeployqt doesn't populate it, so the render process aborts
+# at launch (→ blank chapters). Mirror every bundled framework/dylib into the
+# helper's Frameworks via relative symlinks so all deps resolve.
+HELPER_FW="$MAIN_FW/QtWebEngineCore.framework/Versions/A/Helpers/QtWebEngineProcess.app/Contents/Frameworks"
+if [ -d "$MAIN_FW/QtWebEngineCore.framework" ]; then
+  rm -rf "$HELPER_FW"
+  mkdir -p "$HELPER_FW"
+  for entry in "$MAIN_FW"/*; do
+    name="$(basename "$entry")"
+    [ "$name" = "QtWebEngineCore.framework" ] && continue   # avoid self-reference
+    ln -sfn "../../../../../../../$name" "$HELPER_FW/$name"
+  done
 fi
 
 # macdeployqt rewrites load paths, which invalidates existing signatures.
 # Re-apply an ad-hoc signature so the bundle launches locally.
 echo "==> Ad-hoc codesigning"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
-
-if [ "$IS_BREW_QT" = "1" ]; then
-  cat <<'WARN'
-
-  ⚠  Homebrew Qt detected.
-     Homebrew's Qt is excellent for DEVELOPMENT, but macdeployqt cannot fully
-     bundle a Qt WebEngine app from it — the packaged .app may render chapter
-     content blank. For a distributable build, install the official Qt
-     (https://www.qt.io/download-qt-installer or `aqtinstall`) and re-run:
-         CMAKE_PREFIX_PATH=/path/to/Qt/6.x/macos ./scripts/package-macos.sh
-WARN
-fi
 
 mkdir -p "$DIST_DIR"
 DMG="$DIST_DIR/Spindle-$VERSION-macOS.dmg"
