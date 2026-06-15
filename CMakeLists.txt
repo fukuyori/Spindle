@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.1.3 LANGUAGES C CXX)
+project(Spindle VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,8 +63,12 @@ qt_add_executable(spindle
   src/model/HighlightStore.h
   src/model/TranslationCache.cpp
   src/model/TranslationCache.h
+  src/model/Glossary.cpp
+  src/model/Glossary.h
   src/core/ChapterText.cpp
   src/core/ChapterText.h
+  src/core/BlockIndex.cpp
+  src/core/BlockIndex.h
   src/core/Search.cpp
   src/core/Search.h
   src/core/Markdown.cpp

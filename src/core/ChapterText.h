@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/BlockIndex.h"
+
 #include <QString>
 #include <QVector>
 
@@ -15,6 +17,7 @@ struct ChapterText {
     QVector<int> normalizedToOriginal;  // normalizedBody index -> body index
     QString compactBody;                // all whitespace removed
     QVector<int> compactToOriginal;     // compactBody index -> body index
+    QVector<block_index::BlockInfo> blocks; // leaf blocks (== data-spindle-block order)
 };
 
 struct ChapterRef {

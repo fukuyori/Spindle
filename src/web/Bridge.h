@@ -17,15 +17,19 @@ public:
     void setTranslateView(const QString &view) { m_translateView = view; }
     void notifyTranslateViewChanged() { emit translateViewChanged(m_translateView); }
 
+    void setTranslateLang(const QString &lang) { m_lang = lang; }
+
     // Called from JS.
     Q_INVOKABLE QString currentHighlights() const { return m_json; }
-    Q_INVOKABLE void selectionMade(int start, int end, const QString &text)
+    Q_INVOKABLE void selectionMade(int block, const QString &side, const QString &lang,
+                                   int offset, int length, const QString &text)
     {
-        emit selectionReceived(start, end, text);
+        emit selectionReceived(block, side, lang, offset, length, text);
     }
     Q_INVOKABLE void markClicked(const QString &id) { emit markActivated(id); }
 
     Q_INVOKABLE QString currentTranslateView() const { return m_translateView; }
+    Q_INVOKABLE QString currentTranslateLang() const { return m_lang; }
     Q_INVOKABLE void blocksCollected(const QString &json) { emit blocksReady(json); }
 
     // Called from C++ to drive the page.
@@ -33,16 +37,20 @@ public:
     {
         emit translationReady(index, text, state);
     }
+    void requestScrollToHighlight(const QString &id) { emit scrollToHighlight(id); }
 
 signals:
-    void selectionReceived(int start, int end, const QString &text);
+    void selectionReceived(int block, const QString &side, const QString &lang,
+                           int offset, int length, const QString &text);
     void markActivated(const QString &id);
     void highlightsChanged();
     void translateViewChanged(const QString &view);
     void blocksReady(const QString &json);
     void translationReady(int index, const QString &text, const QString &state);
+    void scrollToHighlight(const QString &id);
 
 private:
     QString m_json;
     QString m_translateView = QStringLiteral("original");
+    QString m_lang;
 };

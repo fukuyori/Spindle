@@ -38,6 +38,18 @@ HighlightSource highlightSourceFromString(const QString &value)
                                             : HighlightSource::User;
 }
 
+QString toString(HighlightSide side)
+{
+    return side == HighlightSide::Translation ? QStringLiteral("translation")
+                                              : QStringLiteral("original");
+}
+
+HighlightSide highlightSideFromString(const QString &value)
+{
+    return value == QLatin1String("translation") ? HighlightSide::Translation
+                                                 : HighlightSide::Original;
+}
+
 QString bookId(const QString &title, const QString &author)
 {
     const QString input = title.trimmed() + QLatin1Char('|') + author.trimmed();

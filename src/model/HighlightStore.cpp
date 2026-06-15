@@ -1,22 +1,16 @@
 #include "model/HighlightStore.h"
 
-#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QStandardPaths>
 
 namespace highlight_store {
 
-QString storageDir()
+QString filePathFor(const QString &epubPath)
 {
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    return base + QStringLiteral("/highlights");
-}
-
-QString filePathFor(const QString &id)
-{
-    return storageDir() + QStringLiteral("/") + id + QStringLiteral(".json");
+    if (epubPath.isEmpty())
+        return {};
+    return epubPath + QStringLiteral(".spindle.highlights.json");
 }
 
 QJsonObject toJson(const Highlight &h)
@@ -24,9 +18,13 @@ QJsonObject toJson(const Highlight &h)
     QJsonObject o;
     o[QStringLiteral("id")] = h.id;
     o[QStringLiteral("chapter")] = h.chapter;
+    o[QStringLiteral("block")] = h.block;
+    o[QStringLiteral("side")] = toString(h.side);
+    if (h.side == HighlightSide::Translation && !h.lang.isEmpty())
+        o[QStringLiteral("lang")] = h.lang;
+    o[QStringLiteral("offset")] = h.offset;
+    o[QStringLiteral("length")] = h.length;
     o[QStringLiteral("text")] = h.text;
-    o[QStringLiteral("start")] = h.start;
-    o[QStringLiteral("end")] = h.end;
     o[QStringLiteral("color")] = toString(h.color);
     if (!h.note.isEmpty())
         o[QStringLiteral("note")] = h.note;
@@ -53,9 +51,12 @@ Highlight fromJson(const QJsonObject &obj)
     Highlight h;
     h.id = obj.value(QStringLiteral("id")).toString();
     h.chapter = obj.value(QStringLiteral("chapter")).toString();
+    h.block = obj.value(QStringLiteral("block")).toInt();
+    h.side = highlightSideFromString(obj.value(QStringLiteral("side")).toString());
+    h.lang = obj.value(QStringLiteral("lang")).toString();
+    h.offset = obj.value(QStringLiteral("offset")).toInt();
+    h.length = obj.value(QStringLiteral("length")).toInt();
     h.text = obj.value(QStringLiteral("text")).toString();
-    h.start = obj.value(QStringLiteral("start")).toInt();
-    h.end = obj.value(QStringLiteral("end")).toInt();
     h.color = highlightColorFromString(obj.value(QStringLiteral("color")).toString());
     h.note = obj.value(QStringLiteral("note")).toString();
     h.source = highlightSourceFromString(obj.value(QStringLiteral("source")).toString());
@@ -114,13 +115,16 @@ BookHighlightFile parseFile(const QByteArray &json, bool *ok)
             file.highlights.append(fromJson(v.toObject()));
     }
     if (ok)
-        *ok = (file.version == 1 && root.contains(QStringLiteral("highlights")));
+        *ok = root.contains(QStringLiteral("highlights"));
     return file;
 }
 
-QVector<Highlight> load(const QString &id)
+QVector<Highlight> load(const QString &epubPath)
 {
-    QFile f(filePathFor(id));
+    const QString path = filePathFor(epubPath);
+    if (path.isEmpty())
+        return {};
+    QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
         return {};
     bool ok = false;
@@ -128,14 +132,16 @@ QVector<Highlight> load(const QString &id)
     return file.highlights;
 }
 
-void save(const QString &id, const BookRef &book, const QVector<Highlight> &highlights)
+void save(const QString &epubPath, const BookRef &book, const QVector<Highlight> &highlights)
 {
-    QDir().mkpath(storageDir());
+    const QString path = filePathFor(epubPath);
+    if (path.isEmpty())
+        return;
     BookHighlightFile file;
-    file.version = 1;
+    file.version = 2;
     file.book = book;
     file.highlights = highlights;
-    QFile f(filePathFor(id));
+    QFile f(path);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         f.write(serializeFile(file));
 }
@@ -168,8 +174,11 @@ QVector<Highlight> byChapter(const QVector<Highlight> &list, const QString &chap
         if (h.chapter == chapterPath)
             out.append(h);
     }
-    std::sort(out.begin(), out.end(),
-              [](const Highlight &a, const Highlight &b) { return a.start < b.start; });
+    std::sort(out.begin(), out.end(), [](const Highlight &a, const Highlight &b) {
+        if (a.block != b.block)
+            return a.block < b.block;
+        return a.offset < b.offset;
+    });
     return out;
 }
 

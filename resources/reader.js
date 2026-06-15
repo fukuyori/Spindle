@@ -1,7 +1,17 @@
-// Injected into every chapter page. Renders highlight marks and reports new
-// selections back to C++ via the QWebChannel `spindle` object. Offsets are
-// character offsets into document.body's textContent (UTF-16 units), matching
-// the original Spindle highlight model.
+// Injected into every chapter page. Renders highlights and reports new
+// selections back to C++ via the QWebChannel `spindle` object.
+//
+// Position model (shared with C++, see src/core/BlockIndex.* and Highlight.*):
+//   - Each leaf block element carries data-spindle-block="N" (injected by C++).
+//     JS reads these numbers; it never computes block order itself.
+//   - A highlight is { block, side, offset, length }. `offset`/`length` are
+//     character counts (UTF-16 units) into the text of the chosen *side*:
+//       side "original"    -> the block element's own text
+//       side "translation" -> the block's .spindle-translation sibling text
+//     counting forward across following blocks (block-only, inter-block text
+//     excluded), bounded by the chapter; never crossing sides or chapters.
+//   - The made side is rendered char-precise; the other side is shown as a
+//     whole-block tint, so highlights are visible in all three views.
 (function () {
   if (window.__spindleReady) return;
   window.__spindleReady = true;
@@ -15,29 +25,69 @@
     purple: "rgba(179,136,255,0.40)"
   };
 
-  function collectTextNodes(root) {
-    var items = [];
-    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+  var BLOCK_SELECTOR = "p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption, dd, dt";
+  var currentLang = "";
+  var reapplyTimer = null;
+
+  // --- blocks ------------------------------------------------------------
+  function leafBlocks() {
+    // Injected by C++, returned in document order.
+    return Array.prototype.slice.call(document.querySelectorAll("[data-spindle-block]"));
+  }
+  function blockByNumber(n) {
+    return document.querySelector('[data-spindle-block="' + n + '"]');
+  }
+  // The text container for a block on a given side.
+  function sideContainer(blockEl, side) {
+    if (side === "translation") {
+      var t = blockEl.nextElementSibling;
+      return t && t.classList.contains("spindle-translation") ? t : null;
+    }
+    return blockEl;
+  }
+  // Text nodes inside a container, excluding highlight marks and (for the
+  // original side) any inserted translation text.
+  function containerTextNodes(container, side) {
+    var out = [];
+    var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
       acceptNode: function (node) {
         var p = node.parentElement;
         if (p && p.closest("mark.spindle-hl")) return NodeFilter.FILTER_REJECT;
-        // Inserted translation paragraphs must NOT count toward offsets, or
-        // highlight positions drift once a chapter is translated (bilingual).
-        if (p && p.closest(".spindle-translation")) return NodeFilter.FILTER_REJECT;
+        if (side !== "translation" && p && p.closest(".spindle-translation"))
+          return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
-    var offset = 0;
-    var node = walker.nextNode();
-    while (node) {
-      var len = node.length;
-      items.push({ node: node, start: offset, end: offset + len });
-      offset += len;
-      node = walker.nextNode();
+    var n;
+    while ((n = walker.nextNode())) out.push(n);
+    return out;
+  }
+  // Ordered {node,start,end,block} list across the side's blocks, starting at the
+  // anchor block, cumulative offset 0 = first char of the anchor block's side
+  // text. Stops once `need` chars are covered (Infinity = whole chapter).
+  function sideOffsetList(anchorBlockEl, side, need) {
+    var blocks = leafBlocks();
+    var startIdx = blocks.indexOf(anchorBlockEl);
+    if (startIdx < 0) return [];
+    var items = [], offset = 0;
+    for (var bi = startIdx; bi < blocks.length; bi++) {
+      var container = sideContainer(blocks[bi], side);
+      if (!container) {
+        if (side === "translation") break; // untranslated gap: stop
+        continue;
+      }
+      var nodes = containerTextNodes(container, side);
+      for (var k = 0; k < nodes.length; k++) {
+        var len = nodes[k].length;
+        items.push({ node: nodes[k], start: offset, end: offset + len, block: blocks[bi] });
+        offset += len;
+      }
+      if (offset >= need) break;
     }
     return items;
   }
 
+  // --- rendering ---------------------------------------------------------
   function wrapPortion(node, ls, le, h) {
     var text = node.nodeValue || "";
     if (ls < 0 || le > text.length || ls >= le) return;
@@ -59,20 +109,53 @@
     parent.replaceChild(frag, node);
   }
 
+  function tintBlock(el, h) {
+    el.classList.add("spindle-hl-block");
+    el.style.backgroundColor = COLORS[h.color] || COLORS.yellow;
+    el.style.borderRadius = "2px";
+    el.style.cursor = "pointer";
+    if (!el.getAttribute("data-hl-id")) el.setAttribute("data-hl-id", h.id);
+  }
+
   function applyOne(h) {
-    var items = collectTextNodes(document.body);
-    var si = -1, ei = -1;
-    for (var i = 0; i < items.length; i++) {
-      if (si < 0 && h.start >= items[i].start && h.start < items[i].end) si = i;
-      if (h.end > items[i].start && h.end <= items[i].end) ei = i;
+    var anchor = blockByNumber(h.block);
+    if (!anchor) return;
+    var side = h.side === "translation" ? "translation" : "original";
+    // A translation-side highlight can only be placed char-precise when the
+    // displayed translation is the same language it was made in.
+    var charSide = side;
+    if (side === "translation" && h.lang && currentLang && h.lang !== currentLang)
+      charSide = null;
+
+    var covered = {};
+    if (charSide) {
+      var s = h.offset, e = h.offset + h.length;
+      var list = sideOffsetList(anchor, charSide, e);
+      var si = -1, ei = -1;
+      for (var i = 0; i < list.length; i++) {
+        if (si < 0 && s >= list[i].start && s < list[i].end) si = i;
+        if (e > list[i].start && e <= list[i].end) ei = i;
+      }
+      if (si >= 0 && ei >= 0) {
+        for (var j = ei; j >= si; j--) {
+          var it = list[j];
+          var ls = j === si ? s - it.start : 0;
+          var le = j === ei ? e - it.start : it.end - it.start;
+          if (ls >= le) continue;
+          covered[it.block.getAttribute("data-spindle-block")] = it.block;
+          wrapPortion(it.node, ls, le, h);
+        }
+      }
     }
-    if (si < 0 || ei < 0) return;
-    for (var j = ei; j >= si; j--) {
-      var it = items[j];
-      var ls = j === si ? h.start - it.start : 0;
-      var le = j === ei ? h.end - it.start : it.end - it.start;
-      if (ls >= le) continue;
-      wrapPortion(it.node, ls, le, h);
+    if (!Object.keys(covered).length) covered[String(h.block)] = anchor;
+
+    // Tint the *other* side's blocks so the highlight stays visible there too.
+    var otherSide = side === "translation" ? "original" : "translation";
+    for (var key in covered) {
+      var bEl = covered[key] || blockByNumber(key);
+      if (!bEl) continue;
+      var oc = sideContainer(bEl, otherSide);
+      if (oc) tintBlock(oc, h);
     }
   }
 
@@ -86,6 +169,27 @@
       parent.removeChild(m);
       if (parent.normalize) parent.normalize();
     }
+    var tints = document.querySelectorAll(".spindle-hl-block");
+    for (var t = 0; t < tints.length; t++) {
+      var el = tints[t];
+      el.classList.remove("spindle-hl-block");
+      el.style.backgroundColor = "";
+      el.style.borderRadius = "";
+      el.style.cursor = "";
+      el.removeAttribute("data-hl-id");
+    }
+  }
+
+  function attachClickHandlers() {
+    var nodes = document.querySelectorAll("mark.spindle-hl, .spindle-hl-block");
+    for (var k = 0; k < nodes.length; k++) {
+      nodes[k].addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var id = this.getAttribute("data-hl-id");
+        if (window.spindle && id) window.spindle.markClicked(id);
+      });
+    }
   }
 
   function applyAll() {
@@ -95,30 +199,51 @@
       var arr;
       try { arr = JSON.parse(jsonStr); } catch (e) { return; }
       if (!arr || !arr.length) return;
-      // Apply from the last highlight backwards so earlier offsets stay valid
-      // as marks (excluded from collectTextNodes) are inserted.
-      arr.sort(function (a, b) { return b.start - a.start; });
+      // Apply later offsets first so earlier ones stay valid as marks (excluded
+      // from the text walk) are inserted.
+      arr.sort(function (a, b) {
+        if (a.block !== b.block) return b.block - a.block;
+        return b.offset - a.offset;
+      });
       arr.forEach(applyOne);
-      var marks = document.querySelectorAll("mark.spindle-hl");
-      for (var k = 0; k < marks.length; k++) {
-        marks[k].style.cursor = "pointer";
-        marks[k].addEventListener("click", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var id = this.getAttribute("data-hl-id");
-          if (window.spindle && id) window.spindle.markClicked(id);
-        });
-      }
+      attachClickHandlers();
     });
   }
 
+  function scheduleReapply() {
+    if (reapplyTimer) clearTimeout(reapplyTimer);
+    reapplyTimer = setTimeout(function () { reapplyTimer = null; applyAll(); }, 120);
+  }
+
+  // --- selection / creation ---------------------------------------------
   function isNodeAfter(node, ref) {
     return (ref.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   }
   function isNodeBefore(node, ref) {
     return (ref.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING) !== 0;
   }
-
+  function elementOf(node) {
+    return node && node.nodeType === Node.ELEMENT_NODE ? node : (node ? node.parentElement : null);
+  }
+  function sideOfNode(node) {
+    var el = elementOf(node);
+    if (!el) return null;
+    if (el.closest(".spindle-translation")) return "translation";
+    if (el.closest("[data-spindle-block]")) return "original";
+    return null;
+  }
+  function anchorBlockFor(node, side) {
+    var el = elementOf(node);
+    if (!el) return null;
+    if (side === "translation") {
+      var t = el.closest(".spindle-translation");
+      if (!t) return null;
+      var b = t.previousElementSibling;
+      return b && b.hasAttribute("data-spindle-block") ? b : null;
+    }
+    return el.closest("[data-spindle-block]");
+  }
+  // Map a (container, offset) boundary to a cumulative offset within `items`.
   function boundaryToOffset(items, container, offset, isStart) {
     if (container.nodeType === Node.TEXT_NODE) {
       for (var i = 0; i < items.length; i++)
@@ -148,16 +273,27 @@
     var text = sel.toString();
     if (!text.trim()) return;
     if (!document.body.contains(range.startContainer) || !document.body.contains(range.endContainer)) return;
-    var items = collectTextNodes(document.body);
+
+    var side = sideOfNode(range.startContainer);
+    if (!side) return;
+    // A single highlight cannot span original and translation.
+    if (sideOfNode(range.endContainer) !== side) return;
+
+    var anchor = anchorBlockFor(range.startContainer, side);
+    if (!anchor) return;
+    var block = parseInt(anchor.getAttribute("data-spindle-block"), 10);
+    if (isNaN(block)) return;
+
+    var items = sideOffsetList(anchor, side, Infinity);
     var start = boundaryToOffset(items, range.startContainer, range.startOffset, true);
     var end = boundaryToOffset(items, range.endContainer, range.endOffset, false);
     if (start === null || end === null || start >= end) return;
-    if (window.spindle) window.spindle.selectionMade(start, end, text);
+
+    if (window.spindle)
+      window.spindle.selectionMade(block, side, currentLang || "", start, end - start, text);
   }
 
   // --- translation -------------------------------------------------------
-  var BLOCK_SELECTOR = "p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption, dd, dt";
-
   function collectLeafBlocks() {
     var nodes = document.body.querySelectorAll(BLOCK_SELECTOR);
     var out = [];
@@ -206,7 +342,10 @@
 
   function onTranslateView(view) {
     applyViewClass(view);
+    if (window.spindle)
+      window.spindle.currentTranslateLang(function (l) { currentLang = l || ""; });
     if (view !== "original") startTranslation();
+    scheduleReapply();
   }
 
   function onTranslation(index, text, state) {
@@ -223,6 +362,28 @@
     if (state) node.setAttribute("data-state", state);
     else node.removeAttribute("data-state");
     if (state !== "error") block.classList.add("spindle-source");
+    // Translation paragraphs just appeared: re-render so translation-side marks
+    // and other-side block tints attach to them.
+    scheduleReapply();
+  }
+
+  // Scroll to a highlight: prefer its char-level mark, else its block tint —
+  // whichever is currently visible in the active view.
+  function onScrollHighlight(id, tries) {
+    var nodes = document.querySelectorAll('[data-hl-id="' + id + '"]');
+    var target = null;
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].offsetParent !== null) { target = nodes[i]; break; }
+    }
+    if (!target && nodes.length) target = nodes[0];
+    if (!target) {
+      if ((tries || 0) < 40) setTimeout(function () { onScrollHighlight(id, (tries || 0) + 1); }, 25);
+      return;
+    }
+    target.scrollIntoView({ block: "center", inline: "center" });
+    var prev = target.style.outline;
+    target.style.outline = "2px solid #f4a259";
+    setTimeout(function () { target.style.outline = prev; }, 1200);
   }
 
   function init() {
@@ -231,7 +392,9 @@
       window.spindle.highlightsChanged.connect(applyAll);
       window.spindle.translateViewChanged.connect(onTranslateView);
       window.spindle.translationReady.connect(onTranslation);
+      window.spindle.scrollToHighlight.connect(function (id) { onScrollHighlight(id, 0); });
       ensureTranslateStyle();
+      window.spindle.currentTranslateLang(function (l) { currentLang = l || ""; });
       applyAll();
       window.spindle.currentTranslateView(function (view) {
         onTranslateView(view || "original");

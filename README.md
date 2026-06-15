@@ -2,8 +2,7 @@
 
 *English | [日本語](README.ja.md)*
 
-A native, cross-platform EPUB reader — a C++/Qt re-implementation of the
-original [Spindle](https://github.com/fukuyori/Spindle) (TypeScript + Tauri).
+Spindle is a native, cross-platform EPUB reader built with C++ and Qt.
 
 Built with Qt Widgets + **Qt WebEngine** for the reading view, so each book is
 rendered with full fidelity to its own CSS — including Japanese vertical writing
@@ -25,31 +24,36 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
   colored marks render in place (works in vertical text); add/edit notes,
-  list, and delete; saved as JSON per book.
-- **Markdown / JSON** highlight export & import, format-compatible with the
-  original Spindle.
-- **Kindle Notebook** (HTML) import with multi-stage text matching onto chapter
-  offsets.
+  list, and delete. Highlights are anchored to a document-order block and a
+  character range within the chosen side (original *or* translation), so they
+  stay correct in all three views — the made side is shown character-precise and
+  the other side as a whole-block tint. Saved next to the EPUB.
+- **Markdown / JSON** highlight export & import.
+- **Kindle Notebook** (HTML) import, matched onto chapter blocks.
 - **Aozora Bunko XHTML** export of the current chapter (ruby preserved, images
   inlined as data URIs).
 - **Local AI translation** via [Ollama](https://ollama.com) — whole-chapter
   modes (original / bilingual / translation-only) plus on-the-spot translation
   of a selection; configurable model, target language and endpoint. Results are
-  **cached per book and language** (persisted to disk), so re-reading is instant.
+  **cached per book and language** next to the EPUB, so re-reading is instant.
+- **Translation glossary** — an optional `<book>.epub.glossary.json` fixes the
+  target wording of chosen terms (names, jargon) for consistent translations.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
   from the cache (missing paragraphs are translated on export); the output's
   language metadata is set to the target language.
 - **XHTML source view** — toggle the current chapter between the rendered view
   and its raw markup.
 - **Comfortable reading margins** and a collapsible sidebar.
-- **Multiple books at once** — each EPUB opens in its own window.
-- **Drag-and-drop**, command-line arguments, and "open with" file opening.
+- **Multiple books at once** — drag a `.epub` onto a window to open it in that
+  window if it has no book yet, otherwise in a new one; command-line arguments
+  and "open with" are also supported.
 
 ## Usage
 
-Open an EPUB from **ファイル → EPUB を開く**, by dragging a `.epub` onto the
-window, or by passing one or more paths on the command line. Each book opens in
-its own window, so you can read several at once.
+Open an EPUB from **ファイル → EPUB を開く**, by dragging a `.epub` onto a
+window (including onto the reading area), or by passing one or more paths on the
+command line. A drop opens in the current window if it has no book yet, otherwise
+in a new window, so you can read several at once.
 
 | Action | Shortcut |
 |--------|----------|
@@ -69,6 +73,56 @@ its own window, so you can read several at once.
   builds a new `.epub` from the cached translations (any not-yet-translated
   paragraphs are translated first, with a cancelable progress dialog).
 - **Source view:** the **</> XML** button shows the chapter's raw XHTML.
+
+### Sidecar files
+
+Per-book data is written next to the `.epub` (not in an app data directory):
+
+| File | Contents |
+|------|----------|
+| `<book>.epub.spindle.highlights.json` | highlights & notes |
+| `<book>.epub.spindle.<lang>.json` | translation cache for a target language |
+| `<book>.epub.glossary.json` | optional glossary (you create/edit this) |
+
+#### Glossary format
+
+Create `<book>.epub.glossary.json` next to the book (for `Changeling.epub`, the
+file is `Changeling.epub.glossary.json`). It fixes how chosen terms are
+translated, per target language:
+
+```json
+{
+  "version": 1,
+  "langs": {
+    "ja": [
+      { "source": "Changeling", "target": "チェンジリング", "note": "character name" },
+      { "source": "the Order", "target": "教団" }
+    ],
+    "en": [
+      { "source": "妖精", "target": "fae" }
+    ]
+  }
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `version` | yes | format version, currently `1` |
+| `langs` | yes | object keyed by target language code (`ja`, `en`, …) — the same code used as the translation target |
+| `langs.<code>[]` | — | list of term entries for that target language |
+| `source` | yes | the term as it appears in the original text |
+| `target` | yes | the wording to use in the translation |
+| `note` | no | a short hint passed to the model (e.g. `"character name"`) |
+
+Notes:
+- The entries for the **current target language** are added to the translation
+  prompt, so each language has its own list; switching the target language loads
+  that language's section.
+- Entries with an empty `source` or `target` are ignored.
+- Enforcement is via the prompt (the model is told to use these translations), so
+  it is a strong preference, not a hard substitution — wording may still adapt to
+  grammar/inflection. The file is read when the book is opened or the target
+  language changes (edit it, then reopen the book or switch language to reload).
 
 ## Build
 
@@ -135,11 +189,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.1.3` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.2.0` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.1.3 && git push origin v0.1.3
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 ## Project layout
@@ -157,6 +211,10 @@ packaging/   Linux .desktop entry
 scripts/     build & packaging scripts (see scripts/README.md)
 third_party/ vendored miniz
 ```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## Third-party
 

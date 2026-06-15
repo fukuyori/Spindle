@@ -1,12 +1,9 @@
 #include "model/TranslationCache.h"
 
-#include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
-#include <QStandardPaths>
 
 QString TranslationCache::normalizeKey(const QString &text)
 {
@@ -16,20 +13,20 @@ QString TranslationCache::normalizeKey(const QString &text)
 
 QString TranslationCache::filePath() const
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-                        + QStringLiteral("/translations");
-    return dir + QStringLiteral("/") + m_bookId + QStringLiteral(".") + m_lang
-           + QStringLiteral(".json");
+    if (m_epubPath.isEmpty() || m_lang.isEmpty())
+        return {};
+    // Sidecar file next to the EPUB: <epubPath>.spindle.<lang>.json
+    return m_epubPath + QStringLiteral(".spindle.") + m_lang + QStringLiteral(".json");
 }
 
-void TranslationCache::load(const QString &bookId, const QString &lang)
+void TranslationCache::load(const QString &epubPath, const QString &lang)
 {
-    flush(); // persist any pending changes for the previous (book, lang)
-    m_bookId = bookId;
+    flush(); // persist any pending changes for the previous (epub, lang)
+    m_epubPath = epubPath;
     m_lang = lang;
     m_map.clear();
     m_dirty = false;
-    if (bookId.isEmpty() || lang.isEmpty())
+    if (epubPath.isEmpty() || lang.isEmpty())
         return;
 
     QFile f(filePath());
@@ -64,16 +61,14 @@ void TranslationCache::put(const QString &sourceText, const QString &translation
 
 void TranslationCache::flush() const
 {
-    if (!m_dirty || m_bookId.isEmpty() || m_lang.isEmpty())
+    if (!m_dirty || m_epubPath.isEmpty() || m_lang.isEmpty())
         return;
-    QDir().mkpath(QFileInfo(filePath()).absolutePath());
 
     QJsonObject entries;
     for (auto it = m_map.begin(); it != m_map.end(); ++it)
         entries.insert(it.key(), it.value());
     QJsonObject root;
     root[QStringLiteral("version")] = 1;
-    root[QStringLiteral("book_id")] = m_bookId;
     root[QStringLiteral("lang")] = m_lang;
     root[QStringLiteral("entries")] = entries;
 

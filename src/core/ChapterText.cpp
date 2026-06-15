@@ -113,8 +113,10 @@ QVector<ChapterText> buildChapterTexts(const EpubBook &book,
     for (const ChapterRef &ref : chapters) {
         if (!book.contains(ref.path))
             continue;
-        const QString body = extractChapterBody(book.readText(ref.path));
-        out.append(buildChapterText(ref, body));
+        const QString xhtml = book.readText(ref.path);
+        ChapterText ct = buildChapterText(ref, extractChapterBody(xhtml));
+        ct.blocks = block_index::enumerateBlocks(xhtml);
+        out.append(ct);
     }
     return out;
 }

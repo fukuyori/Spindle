@@ -2,6 +2,7 @@
 
 #include "core/ChapterText.h"
 #include "epub/EpubBook.h"
+#include "model/Glossary.h"
 #include "model/Highlight.h"
 #include "model/TranslationCache.h"
 
@@ -47,6 +48,9 @@ protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    // The central QWebEngineView consumes drops over the page area, so we filter
+    // its internal child widgets to catch EPUB drops there too.
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
     void onOpenTriggered();
@@ -63,7 +67,8 @@ private slots:
     void onHighlightActivated(QListWidgetItem *item);
     void showSidebarTab(int tab); // 0 = toc, 1 = highlights
     void onLoadFinished(bool ok);
-    void onWebSelection(int start, int end, const QString &text);
+    void onWebSelection(int block, const QString &side, const QString &lang, int offset,
+                        int length, const QString &text);
     void openTranslateDialog();
     void onBlocksReady(const QString &json);
     void onOllamaFinished(bool ok, const QString &result);
@@ -78,6 +83,8 @@ private slots:
 
 private:
     void buildUi();
+    static bool mimeHasEpub(const class QMimeData *mime);
+    void openEpubsFromMime(const class QMimeData *mime);
     void populateToc();
     void addTocItems(const QVector<TocItem> &items, QTreeWidgetItem *parent);
     void displayChapter(int index, const QString &fragment = QString());
@@ -94,7 +101,8 @@ private:
     void setupWebChannel();
     QString chapterHighlightsJson() const;
     void pushHighlightsToView();
-    void createHighlight(HighlightColor color, int start, int end, const QString &selectedText,
+    void createHighlight(HighlightColor color, int block, HighlightSide side, const QString &lang,
+                         int offset, int length, const QString &selectedText,
                          const QString &note = QString());
     void removeHighlightById(const QString &id);
     void setHighlightColor(const QString &id, HighlightColor color);
@@ -128,6 +136,7 @@ private:
 
     QString m_pendingFragment;
     QString m_pendingFind;
+    QString m_pendingScrollId; // highlight id to scroll to after the page loads
 
     QString m_schemeId; // unique epub:// host for this window's book
     QWebEngineView *m_view = nullptr;
@@ -149,6 +158,7 @@ private:
     QString m_trCurText; // source text of the in-flight translation
     bool m_trAnyOk = false;
     TranslationCache m_trCache;
+    Glossary m_trGlossary;
     QTimer *m_trCacheSave = nullptr;
     QTreeWidget *m_toc = nullptr;
     QListWidget *m_highlightsList = nullptr;

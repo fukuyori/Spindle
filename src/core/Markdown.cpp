@@ -153,7 +153,9 @@ QString exportMarkdown(const BookRef &book, const QVector<Highlight> &highlights
             const int bi = orderByPath.value(b.chapter, 9999);
             return ai < bi;
         }
-        return a.start < b.start;
+        if (a.block != b.block)
+            return a.block < b.block;
+        return a.offset < b.offset;
     });
 
     QString currentChapter;
@@ -172,8 +174,12 @@ QString exportMarkdown(const BookRef &book, const QVector<Highlight> &highlights
         lines << QStringLiteral("<!--spindle");
         lines << QStringLiteral("id: ") + h.id;
         lines << QStringLiteral("chapter: ") + h.chapter;
-        lines << QStringLiteral("start: ") + QString::number(h.start);
-        lines << QStringLiteral("end: ") + QString::number(h.end);
+        lines << QStringLiteral("block: ") + QString::number(h.block);
+        lines << QStringLiteral("side: ") + toString(h.side);
+        if (h.side == HighlightSide::Translation && !h.lang.isEmpty())
+            lines << QStringLiteral("lang: ") + h.lang;
+        lines << QStringLiteral("offset: ") + QString::number(h.offset);
+        lines << QStringLiteral("length: ") + QString::number(h.length);
         lines << QStringLiteral("color: ") + toString(h.color);
         lines << QStringLiteral("source: ") + toString(h.source);
         if (h.kindle) {
@@ -241,8 +247,11 @@ BookHighlightFile parseMarkdown(const QString &text)
         h.id = meta.value(QStringLiteral("id"));
         h.chapter = meta.value(QStringLiteral("chapter"));
         h.text = quote;
-        h.start = meta.value(QStringLiteral("start"), QStringLiteral("0")).toInt();
-        h.end = meta.value(QStringLiteral("end"), QStringLiteral("0")).toInt();
+        h.block = meta.value(QStringLiteral("block"), QStringLiteral("0")).toInt();
+        h.side = highlightSideFromString(meta.value(QStringLiteral("side")));
+        h.lang = meta.value(QStringLiteral("lang"));
+        h.offset = meta.value(QStringLiteral("offset"), QStringLiteral("0")).toInt();
+        h.length = meta.value(QStringLiteral("length"), QStringLiteral("0")).toInt();
         h.color = highlightColorFromString(meta.value(QStringLiteral("color")));
         h.source = highlightSourceFromString(meta.value(QStringLiteral("source")));
         if (!note.isEmpty())

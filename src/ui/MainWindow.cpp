@@ -20,7 +20,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QChildEvent>
 #include <QDragEnterEvent>
+#include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -326,6 +328,9 @@ void MainWindow::buildUi()
     // The epub:// scheme handler is installed once, globally, on the default
     // profile (see main()); this window just registers its book under m_schemeId.
     m_view = new QWebEngineView(this);
+    // Catch EPUB drops over the page area: the view's render widget (a lazily
+    // created child) handles drops itself, so watch it and its descendants.
+    m_view->installEventFilter(this);
     m_view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
     m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
     connect(m_view, &QWebEngineView::loadFinished, this, &MainWindow::onLoadFinished);
@@ -419,8 +424,9 @@ bool MainWindow::openEpub(const QString &filePath)
     m_searchInput->clear();
 
     m_bookId = bookId(m_book->title(), m_book->author());
-    m_highlights = highlight_store::load(m_bookId);
-    m_trCache.load(m_bookId, m_trTarget);
+    m_highlights = highlight_store::load(m_epubPath);
+    m_trCache.load(m_epubPath, m_trTarget);
+    m_trGlossary.load(m_epubPath, m_trTarget);
 
     m_titleLabel->setText(m_book->title().isEmpty() ? QStringLiteral("(無題)") : m_book->title());
     m_authorLabel->setText(m_book->author());
@@ -505,6 +511,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     if (m_bridge) {
         m_bridge->setHighlightsJson(chapterHighlightsJson());
         m_bridge->setTranslateView(translateViewString());
+        m_bridge->setTranslateLang(m_trTarget);
     }
 
     m_pendingFragment = fragment;
@@ -538,6 +545,12 @@ void MainWindow::onLoadFinished(bool ok)
         const QString find = m_pendingFind;
         m_pendingFind.clear();
         m_view->findText(find);
+    }
+    if (!m_pendingScrollId.isEmpty()) {
+        const QString id = m_pendingScrollId;
+        m_pendingScrollId.clear();
+        if (m_bridge)
+            m_bridge->requestScrollToHighlight(id); // reader.js retries until the mark exists
     }
 }
 
@@ -716,10 +729,15 @@ void MainWindow::onSearchResultActivated(QListWidgetItem *item)
 
 // --- highlights ------------------------------------------------------------
 
-void MainWindow::onWebSelection(int start, int end, const QString &text)
+void MainWindow::onWebSelection(int block, const QString &side, const QString &lang, int offset,
+                                int length, const QString &text)
 {
-    if (!m_book || m_currentChapter < 0 || text.trimmed().isEmpty() || start >= end)
+    if (!m_book || m_currentChapter < 0 || text.trimmed().isEmpty() || length <= 0)
         return;
+    const HighlightSide hside = highlightSideFromString(side);
+    // A translation-side highlight belongs to the language currently displayed.
+    const QString effLang =
+        hside == HighlightSide::Translation ? (lang.isEmpty() ? m_trTarget : lang) : QString();
 
     QMenu menu;
     const HighlightColor colors[] = {HighlightColor::Yellow, HighlightColor::Blue,
@@ -742,9 +760,9 @@ void MainWindow::onWebSelection(int start, int end, const QString &text)
         const QString note = QInputDialog::getMultiLineText(
             this, QStringLiteral("ノート"), QStringLiteral("ノートを入力:"), QString(), &ok);
         if (ok)
-            createHighlight(HighlightColor::Yellow, start, end, text, note);
+            createHighlight(HighlightColor::Yellow, block, hside, effLang, offset, length, text, note);
     } else if (map.contains(chosen)) {
-        createHighlight(map.value(chosen), start, end, text);
+        createHighlight(map.value(chosen), block, hside, effLang, offset, length, text);
     }
 }
 
@@ -756,8 +774,11 @@ QString MainWindow::chapterHighlightsJson() const
         for (const Highlight &h : highlight_store::byChapter(m_highlights, path)) {
             QJsonObject o;
             o[QStringLiteral("id")] = h.id;
-            o[QStringLiteral("start")] = h.start;
-            o[QStringLiteral("end")] = h.end;
+            o[QStringLiteral("block")] = h.block;
+            o[QStringLiteral("side")] = toString(h.side);
+            o[QStringLiteral("lang")] = h.lang;
+            o[QStringLiteral("offset")] = h.offset;
+            o[QStringLiteral("length")] = h.length;
             o[QStringLiteral("color")] = toString(h.color);
             if (!h.note.isEmpty())
                 o[QStringLiteral("note")] = h.note;
@@ -775,20 +796,25 @@ void MainWindow::pushHighlightsToView()
     m_bridge->notifyChanged();
 }
 
-void MainWindow::createHighlight(HighlightColor color, int start, int end,
+void MainWindow::createHighlight(HighlightColor color, int block, HighlightSide side,
+                                 const QString &lang, int offset, int length,
                                  const QString &selectedText, const QString &note)
 {
     if (!m_book || m_currentChapter < 0)
         return;
     const QString text = selectedText;
-    if (text.trimmed().isEmpty() || start >= end)
+    if (text.trimmed().isEmpty() || length <= 0)
         return;
 
     Highlight h;
     h.id = generateHighlightId();
     h.chapter = m_book->chapters().at(m_currentChapter).path;
-    h.start = start;
-    h.end = end;
+    h.block = block;
+    h.side = side;
+    if (side == HighlightSide::Translation)
+        h.lang = lang;
+    h.offset = offset;
+    h.length = length;
     h.text = text;
     h.color = color;
     h.note = note.trimmed();
@@ -889,7 +915,9 @@ void MainWindow::renderHighlightsList()
         const int bi = m_book->chapterIndexForPath(b.chapter);
         if (ai != bi)
             return ai < bi;
-        return a.start < b.start;
+        if (a.block != b.block)
+            return a.block < b.block;
+        return a.offset < b.offset;
     });
 
     for (const Highlight &h : ordered) {
@@ -915,14 +943,13 @@ void MainWindow::onHighlightActivated(QListWidgetItem *item)
         const int index = m_book->chapterIndexForPath(h.chapter);
         if (index < 0)
             return;
-        QString find = h.text.section(QChar('\n'), 0, 0).trimmed();
-        if (find.size() > 40)
-            find = find.left(40);
+        // Scroll to the highlight's own mark (by id), not a text search — a text
+        // search would also match a romanized term echoed in the translation.
         if (index != m_currentChapter) {
-            m_pendingFind = find;
+            m_pendingScrollId = id;
             displayChapter(index);
-        } else {
-            m_view->findText(find);
+        } else if (m_bridge) {
+            m_bridge->requestScrollToHighlight(id);
         }
         return;
     }
@@ -930,11 +957,11 @@ void MainWindow::onHighlightActivated(QListWidgetItem *item)
 
 void MainWindow::persistHighlights()
 {
-    if (m_bookId.isEmpty())
+    if (m_epubPath.isEmpty())
         return;
     BookRef ref{m_bookId, m_book ? m_book->title() : QString(),
                 m_book ? m_book->author() : QString()};
-    highlight_store::save(m_bookId, ref, m_highlights);
+    highlight_store::save(m_epubPath, ref, m_highlights);
 }
 
 // --- import / export -------------------------------------------------------
@@ -1056,7 +1083,8 @@ void MainWindow::exportTranslatedEpub(int mode)
             QString out;
             auto conn = connect(&client, &OllamaClient::finished, &loop,
                                 [&](bool o, const QString &r) { ok = o; out = r; loop.quit(); });
-            client.translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), text);
+            client.translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), text,
+                             m_trGlossary.promptBlock());
             loop.exec();
             disconnect(conn);
 
@@ -1149,7 +1177,8 @@ void MainWindow::translateNext(int run)
     if (m_bridge)
         m_bridge->applyTranslation(m_trCurIndex, QStringLiteral("翻訳中…"),
                                    QStringLiteral("pending"));
-    m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), item.second);
+    m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), item.second,
+                        m_trGlossary.promptBlock());
 }
 
 void MainWindow::onOllamaFinished(bool ok, const QString &result)
@@ -1185,7 +1214,8 @@ void MainWindow::translateSelection(const QString &text)
     if (src.isEmpty())
         return;
     showTranslatePopup(QStringLiteral("翻訳中…"));
-    m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), src);
+    m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), src,
+                                 m_trGlossary.promptBlock());
 }
 
 void MainWindow::onSelectionTranslated(bool ok, const QString &result)
@@ -1269,7 +1299,8 @@ void MainWindow::openTranslateDialog()
         m_trEndpoint = ep.isEmpty() ? QStringLiteral("http://localhost:11434") : ep;
         if (newTarget != m_trTarget) {
             m_trTarget = newTarget;
-            m_trCache.load(m_bookId, m_trTarget); // switch to the new language's cache
+            m_trCache.load(m_epubPath, m_trTarget); // switch to the new language's cache
+            m_trGlossary.load(m_epubPath, m_trTarget);
         }
         QSettings settings;
         settings.setValue(QStringLiteral("translate/target"), m_trTarget);
@@ -1344,7 +1375,7 @@ void MainWindow::importKindleNotebook()
         bool exists = false;
         for (const Highlight &h : m_highlights) {
             if (h.source == HighlightSource::Kindle && h.chapter == m.chapterPath
-                && h.start == m.start && h.end == m.end) {
+                && h.block == m.block && h.offset == m.offset && h.length == m.length) {
                 exists = true;
                 break;
             }
@@ -1356,9 +1387,11 @@ void MainWindow::importKindleNotebook()
         Highlight h;
         h.id = generateHighlightId();
         h.chapter = m.chapterPath;
+        h.block = m.block;
+        h.side = HighlightSide::Original;
+        h.offset = m.offset;
+        h.length = m.length;
         h.text = m.matchedText;
-        h.start = m.start;
-        h.end = m.end;
         h.color = m.entry.color;
         h.note = m.entry.note;
         h.source = HighlightSource::Kindle;
@@ -1457,26 +1490,72 @@ void MainWindow::updateSidebarMode()
 
 // --- events ----------------------------------------------------------------
 
-void MainWindow::dragEnterEvent(QDragEnterEvent *event)
+bool MainWindow::mimeHasEpub(const QMimeData *mime)
 {
-    if (event->mimeData()->hasUrls()) {
-        for (const QUrl &url : event->mimeData()->urls()) {
-            if (url.toLocalFile().endsWith(QStringLiteral(".epub"), Qt::CaseInsensitive)) {
-                event->acceptProposedAction();
-                return;
-            }
-        }
-    }
+    if (!mime || !mime->hasUrls())
+        return false;
+    for (const QUrl &url : mime->urls())
+        if (url.toLocalFile().endsWith(QStringLiteral(".epub"), Qt::CaseInsensitive))
+            return true;
+    return false;
 }
 
-void MainWindow::dropEvent(QDropEvent *event)
+void MainWindow::openEpubsFromMime(const QMimeData *mime)
 {
-    // Each dropped EPUB opens its own window (the current book stays open).
-    for (const QUrl &url : event->mimeData()->urls()) {
+    if (!mime)
+        return;
+    // The first EPUB lands in this window if it has no book yet; subsequent ones
+    // (and any when a book is already open) each open in a new window.
+    for (const QUrl &url : mime->urls()) {
         const QString local = url.toLocalFile();
         if (local.endsWith(QStringLiteral(".epub"), Qt::CaseInsensitive))
             openEpubSmart(local);
     }
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (mimeHasEpub(event->mimeData()))
+        event->acceptProposedAction();
+}
+
+void MainWindow::dropEvent(QDropEvent *event)
+{
+    if (mimeHasEpub(event->mimeData())) {
+        openEpubsFromMime(event->mimeData());
+        event->acceptProposedAction();
+    }
+}
+
+bool MainWindow::eventFilter(QObject *obj, QEvent *event)
+{
+    switch (event->type()) {
+    case QEvent::ChildAdded:
+        // Watch the render widget (and its descendants) as they appear so drops
+        // over the page reach us instead of being swallowed by the web view.
+        if (auto *ce = static_cast<QChildEvent *>(event)) {
+            if (ce->child() && ce->child()->isWidgetType())
+                ce->child()->installEventFilter(this);
+        }
+        break;
+    case QEvent::DragEnter:
+    case QEvent::DragMove:
+        if (mimeHasEpub(static_cast<QDragMoveEvent *>(event)->mimeData())) {
+            static_cast<QDragMoveEvent *>(event)->acceptProposedAction();
+            return true;
+        }
+        break;
+    case QEvent::Drop:
+        if (mimeHasEpub(static_cast<QDropEvent *>(event)->mimeData())) {
+            openEpubsFromMime(static_cast<QDropEvent *>(event)->mimeData());
+            static_cast<QDropEvent *>(event)->acceptProposedAction();
+            return true;
+        }
+        break;
+    default:
+        break;
+    }
+    return QMainWindow::eventFilter(obj, event);
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event)

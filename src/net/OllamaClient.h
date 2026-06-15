@@ -13,8 +13,8 @@ class OllamaClient : public QObject {
 public:
     explicit OllamaClient(QObject *parent = nullptr);
 
-    void translate(const QString &endpoint, const QString &model,
-                   const QString &targetLang, const QString &text);
+    void translate(const QString &endpoint, const QString &model, const QString &targetLang,
+                   const QString &text, const QString &glossary = QString());
 
 signals:
     void finished(bool ok, const QString &result);

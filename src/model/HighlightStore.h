@@ -7,15 +7,16 @@
 #include <QVector>
 
 // Per-book highlight persistence + JSON (de)serialization.
-// Files live under QStandardPaths AppDataLocation/highlights/<bookId>.json and
-// use the BookHighlightFile shape (version 1) shared with import/export.
+// Highlights are stored as a sidecar file next to the EPUB:
+//   <epubPath>.spindle.highlights.json
+// using the BookHighlightFile shape (version 2) shared with import/export.
 namespace highlight_store {
 
-QString storageDir();
-QString filePathFor(const QString &id);
+// Sidecar path next to the EPUB (empty if epubPath is empty).
+QString filePathFor(const QString &epubPath);
 
-QVector<Highlight> load(const QString &id);
-void save(const QString &id, const BookRef &book, const QVector<Highlight> &highlights);
+QVector<Highlight> load(const QString &epubPath);
+void save(const QString &epubPath, const BookRef &book, const QVector<Highlight> &highlights);
 
 // In-list mutation helpers mirroring highlights.ts.
 void upsert(QVector<Highlight> &list, const Highlight &highlight);

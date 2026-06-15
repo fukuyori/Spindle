@@ -1,5 +1,6 @@
 #include "web/EpubSchemeHandler.h"
 
+#include "core/BlockIndex.h"
 #include "epub/EpubBook.h"
 
 #include <QBuffer>
@@ -98,8 +99,23 @@ void EpubSchemeHandler::requestStarted(QWebEngineUrlRequestJob *job)
         return;
     }
 
+    QByteArray mime = mimeFor(zipPath);
+    QByteArray data;
+    // For chapter documents, inject document-order block ids so highlight
+    // anchoring shares one coordinate system with C++ (see BlockIndex). If the
+    // markup won't parse, fall back to serving the original bytes untouched.
+    if (mime == "application/xhtml+xml" || mime == "text/html") {
+        const QString injected = block_index::injectBlockIds(book->readText(zipPath));
+        if (!injected.isEmpty()) {
+            data = injected.toUtf8();
+            mime += "; charset=utf-8";
+        }
+    }
+    if (data.isNull())
+        data = book->readBytes(zipPath);
+
     QBuffer *buffer = new QBuffer(job);
-    buffer->setData(book->readBytes(zipPath));
+    buffer->setData(data);
     buffer->open(QIODevice::ReadOnly);
-    job->reply(mimeFor(zipPath), buffer);
+    job->reply(mime, buffer);
 }

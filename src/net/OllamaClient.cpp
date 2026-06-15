@@ -14,20 +14,23 @@ OllamaClient::OllamaClient(QObject *parent)
 }
 
 void OllamaClient::translate(const QString &endpoint, const QString &model,
-                             const QString &targetLang, const QString &text)
+                             const QString &targetLang, const QString &text,
+                             const QString &glossary)
 {
     QString base = endpoint.trimmed();
     while (base.endsWith(QLatin1Char('/')))
         base.chop(1);
     const QUrl url(base + QStringLiteral("/api/chat"));
 
-    const QString system =
+    QString system =
         QStringLiteral(
             "You are a professional literary translator. Translate the user's text into %1. "
             "Output only the translation itself — no explanations, notes, labels, or surrounding "
             "quotation marks. Preserve the original meaning, tone, and punctuation. If the text is "
             "already in %1, return it unchanged.")
             .arg(targetLang);
+    if (!glossary.isEmpty())
+        system += glossary;
 
     QJsonObject body;
     body[QStringLiteral("model")] = model;
