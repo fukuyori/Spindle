@@ -4,6 +4,19 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] - 2026-06-16
+
+### Added
+- **Copy to clipboard** — the selection menu and the highlight menu both have a
+  「コピー」 item that copies the selected / highlighted text.
+
+### Fixed
+- **Multiple highlights in one block** no longer render merged or shifted.
+  Highlight offsets are now measured in the block's plain-text coordinate (text
+  inside existing marks is counted), so creation and rendering agree.
+  (Highlights saved by an earlier version may still be misplaced — re-create
+  them.)
+
 ## [0.2.5] - 2026-06-16
 
 ### Changed

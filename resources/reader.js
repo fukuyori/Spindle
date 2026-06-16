@@ -45,14 +45,16 @@
     }
     return blockEl;
   }
-  // Text nodes inside a container, excluding highlight marks and (for the
-  // original side) any inserted translation text.
+  // Text nodes inside a container, in the block's *plain text* coordinate. Text
+  // inside existing highlight marks IS counted (marks are transparent), so an
+  // offset means the same thing whether or not other marks are currently shown —
+  // essential when a block holds several highlights. (For the original side,
+  // inserted translation text is still excluded.)
   function containerTextNodes(container, side) {
     var out = [];
     var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
       acceptNode: function (node) {
         var p = node.parentElement;
-        if (p && p.closest("mark.spindle-hl")) return NodeFilter.FILTER_REJECT;
         if (side !== "translation" && p && p.closest(".spindle-translation"))
           return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;

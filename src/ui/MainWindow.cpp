@@ -21,7 +21,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QChildEvent>
+#include <QClipboard>
 #include <QCloseEvent>
+#include <QGuiApplication>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -864,11 +866,14 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
     menu.addSeparator();
     QAction *withNote = menu.addAction(QStringLiteral("＋ ノート付きで追加…"));
     QAction *translateAction = menu.addAction(QStringLiteral("🌐 翻訳"));
+    QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
 
     QAction *chosen = menu.exec(QCursor::pos());
     if (!chosen)
         return;
-    if (chosen == translateAction) {
+    if (chosen == copyAction) {
+        QGuiApplication::clipboard()->setText(text);
+    } else if (chosen == translateAction) {
         translateSelection(text);
     } else if (chosen == withNote) {
         bool ok = false;
@@ -988,6 +993,8 @@ void MainWindow::onMarkClicked(const QString &id)
         return;
 
     QMenu menu;
+    QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
+    menu.addSeparator();
     QMenu *colorMenu = menu.addMenu(QStringLiteral("色を変更"));
     const HighlightColor colors[] = {HighlightColor::Yellow, HighlightColor::Blue,
                                      HighlightColor::Pink, HighlightColor::Orange,
@@ -1003,7 +1010,9 @@ void MainWindow::onMarkClicked(const QString &id)
     QAction *chosen = menu.exec(QCursor::pos());
     if (!chosen)
         return;
-    if (chosen == noteAction)
+    if (chosen == copyAction)
+        QGuiApplication::clipboard()->setText(h->text);
+    else if (chosen == noteAction)
         editHighlightNote(id);
     else if (chosen == deleteAction)
         removeHighlightById(id);
