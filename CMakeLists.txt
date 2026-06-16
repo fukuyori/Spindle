@@ -1,12 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.2.7 LANGUAGES C CXX)
+project(Spindle VERSION 0.2.8 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
@@ -84,6 +83,10 @@ qt_add_executable(spindle
   src/ui/MainWindow.cpp
   src/ui/MainWindow.h
 )
+
+# This is a Widgets/WebEngine app with no QML sources. Skipping Qt's QML import
+# scanner avoids running an unnecessary host tool during configure/build.
+set_target_properties(spindle PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
 
 target_include_directories(spindle PRIVATE src)
 

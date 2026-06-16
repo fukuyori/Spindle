@@ -62,6 +62,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyledItemDelegate>
 #include <QTimer>
 #include <QToolBar>
 #include <QTreeWidget>
@@ -94,6 +95,28 @@ protected:
     }
 };
 
+class HighlightListDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override
+    {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        opt.decorationAlignment = Qt::AlignLeft | Qt::AlignTop;
+        QStyledItemDelegate::paint(painter, opt, index);
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        opt.decorationAlignment = Qt::AlignLeft | Qt::AlignTop;
+        return QStyledItemDelegate::sizeHint(opt, index);
+    }
+};
+
 QColor highlightQColor(HighlightColor c)
 {
     switch (c) {
@@ -118,6 +141,15 @@ QString highlightLabel(HighlightColor c)
     case HighlightColor::Purple: return QStringLiteral("パープル");
     }
     return {};
+}
+
+void openWebSearch(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return;
+    const QString q = QString::fromUtf8(QUrl::toPercentEncoding(trimmed));
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.google.com/search?q=") + q));
 }
 
 struct Lang {
@@ -337,6 +369,7 @@ void MainWindow::buildUi()
 
     m_highlightsList = new QListWidget(sidebar);
     m_highlightsList->setWordWrap(true);
+    m_highlightsList->setItemDelegate(new HighlightListDelegate(m_highlightsList));
     m_highlightsList->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_highlightsList, &QListWidget::itemClicked, this, &MainWindow::onHighlightActivated);
     connect(m_highlightsList, &QListWidget::customContextMenuRequested, this,
@@ -876,8 +909,7 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
     if (chosen == copyAction) {
         QGuiApplication::clipboard()->setText(text);
     } else if (chosen == webSearchAction) {
-        const QString q = QString::fromUtf8(QUrl::toPercentEncoding(text.trimmed()));
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.google.com/search?q=") + q));
+        openWebSearch(text);
     } else if (chosen == translateAction) {
         translateSelection(text);
     } else if (chosen == withNote) {
@@ -1022,6 +1054,7 @@ void MainWindow::onMarkClicked(const QString &id)
 
     QMenu menu;
     QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
+    QAction *webSearchAction = menu.addAction(QStringLiteral("Web で検索"));
     menu.addSeparator();
     QMenu *colorMenu = menu.addMenu(QStringLiteral("色を変更"));
     const HighlightColor colors[] = {HighlightColor::Yellow, HighlightColor::Blue,
@@ -1040,6 +1073,8 @@ void MainWindow::onMarkClicked(const QString &id)
         return;
     if (chosen == copyAction)
         QGuiApplication::clipboard()->setText(h->text);
+    else if (chosen == webSearchAction)
+        openWebSearch(h->text);
     else if (chosen == noteAction)
         editHighlightNote(id);
     else if (chosen == deleteAction)
