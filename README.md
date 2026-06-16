@@ -27,9 +27,10 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
   colored marks render in place (works in vertical text); add/edit notes,
   list, and delete. Highlights are anchored to a document-order block and a
-  character range within the chosen side (original *or* translation), so they
-  stay correct in all three views — the made side is shown character-precise and
-  the other side as a whole-block tint. Saved next to the EPUB.
+  character range within the chosen side (original *or* translation) and are
+  shown only on that side (character-precise, never mirrored). The list marks
+  each one ［原］/［訳］ and jumps to its block even when that side isn't shown.
+  Saved next to the EPUB.
 - **Markdown / JSON** highlight export & import.
 - **Kindle Notebook** (HTML) import, matched onto chapter blocks.
 - **Aozora Bunko XHTML** export of the current chapter (ruby preserved, images
@@ -201,11 +202,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.2.4` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.2.5` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.2.4 && git push origin v0.2.4
+git tag v0.2.5 && git push origin v0.2.5
 ```
 
 ## Project layout

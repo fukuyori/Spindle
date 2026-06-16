@@ -4,6 +4,17 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] - 2026-06-16
+
+### Changed
+- **Highlights are no longer mirrored across sides.** A highlight is shown only
+  on the side it was made on (original or translation), character-precise; the
+  earlier whole-block tint on the opposite side was removed.
+- **Highlight list** marks each entry with ［原］ / ［訳］ (original / translation
+  side), and clicking an entry jumps to the highlight's block — landing on the
+  original block or its translation paragraph, whichever the current view shows,
+  even when the highlight's own side isn't displayed.
+
 ## [0.2.4] - 2026-06-16
 
 ### Added

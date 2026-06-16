@@ -1039,7 +1039,10 @@ void MainWindow::renderHighlightsList()
         QString snippet = h.text.simplified();
         if (snippet.size() > 80)
             snippet = snippet.left(80) + QStringLiteral("…");
-        QString label = snippet;
+        // Mark which side the highlight was made on (原文 / 訳文).
+        const QString tag = h.side == HighlightSide::Translation ? QStringLiteral("訳")
+                                                                 : QStringLiteral("原");
+        QString label = QStringLiteral("［%1］%2").arg(tag, snippet);
         if (!h.note.isEmpty())
             label += QStringLiteral("\n📝 ") + h.note.simplified();
         auto *item = new QListWidgetItem(swatchIcon(h.color), label, m_highlightsList);

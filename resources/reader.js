@@ -10,8 +10,8 @@
 //       side "translation" -> the block's .spindle-translation sibling text
 //     counting forward across following blocks (block-only, inter-block text
 //     excluded), bounded by the chapter; never crossing sides or chapters.
-//   - The made side is rendered char-precise; the other side is shown as a
-//     whole-block tint, so highlights are visible in all three views.
+//   - A highlight is shown only on the side it was made on (character-precise);
+//     it is never mirrored onto the other side (no cross-side display).
 (function () {
   if (window.__spindleReady) return;
   window.__spindleReady = true;
@@ -109,53 +109,32 @@
     parent.replaceChild(frag, node);
   }
 
-  function tintBlock(el, h) {
-    el.classList.add("spindle-hl-block");
-    el.style.backgroundColor = COLORS[h.color] || COLORS.yellow;
-    el.style.borderRadius = "2px";
-    el.style.cursor = "pointer";
-    if (!el.getAttribute("data-hl-id")) el.setAttribute("data-hl-id", h.id);
-  }
-
+  // A highlight is shown only on the side it was made on (original or
+  // translation), character-precise. There is no cross-side display: original
+  // highlights are not shown on the translation, and vice versa.
   function applyOne(h) {
     var anchor = blockByNumber(h.block);
     if (!anchor) return;
     var side = h.side === "translation" ? "translation" : "original";
-    // A translation-side highlight can only be placed char-precise when the
-    // displayed translation is the same language it was made in.
-    var charSide = side;
+    // A translation-side highlight only renders when the shown translation is
+    // the same language it was made in.
     if (side === "translation" && h.lang && currentLang && h.lang !== currentLang)
-      charSide = null;
+      return;
 
-    var covered = {};
-    if (charSide) {
-      var s = h.offset, e = h.offset + h.length;
-      var list = sideOffsetList(anchor, charSide, e);
-      var si = -1, ei = -1;
-      for (var i = 0; i < list.length; i++) {
-        if (si < 0 && s >= list[i].start && s < list[i].end) si = i;
-        if (e > list[i].start && e <= list[i].end) ei = i;
-      }
-      if (si >= 0 && ei >= 0) {
-        for (var j = ei; j >= si; j--) {
-          var it = list[j];
-          var ls = j === si ? s - it.start : 0;
-          var le = j === ei ? e - it.start : it.end - it.start;
-          if (ls >= le) continue;
-          covered[it.block.getAttribute("data-spindle-block")] = it.block;
-          wrapPortion(it.node, ls, le, h);
-        }
-      }
+    var s = h.offset, e = h.offset + h.length;
+    var list = sideOffsetList(anchor, side, e);
+    var si = -1, ei = -1;
+    for (var i = 0; i < list.length; i++) {
+      if (si < 0 && s >= list[i].start && s < list[i].end) si = i;
+      if (e > list[i].start && e <= list[i].end) ei = i;
     }
-    if (!Object.keys(covered).length) covered[String(h.block)] = anchor;
-
-    // Tint the *other* side's blocks so the highlight stays visible there too.
-    var otherSide = side === "translation" ? "original" : "translation";
-    for (var key in covered) {
-      var bEl = covered[key] || blockByNumber(key);
-      if (!bEl) continue;
-      var oc = sideContainer(bEl, otherSide);
-      if (oc) tintBlock(oc, h);
+    if (si < 0 || ei < 0) return;
+    for (var j = ei; j >= si; j--) {
+      var it = list[j];
+      var ls = j === si ? s - it.start : 0;
+      var le = j === ei ? e - it.start : it.end - it.start;
+      if (ls >= le) continue;
+      wrapPortion(it.node, ls, le, h);
     }
   }
 
@@ -169,19 +148,10 @@
       parent.removeChild(m);
       if (parent.normalize) parent.normalize();
     }
-    var tints = document.querySelectorAll(".spindle-hl-block");
-    for (var t = 0; t < tints.length; t++) {
-      var el = tints[t];
-      el.classList.remove("spindle-hl-block");
-      el.style.backgroundColor = "";
-      el.style.borderRadius = "";
-      el.style.cursor = "";
-      el.removeAttribute("data-hl-id");
-    }
   }
 
   function attachClickHandlers() {
-    var nodes = document.querySelectorAll("mark.spindle-hl, .spindle-hl-block");
+    var nodes = document.querySelectorAll("mark.spindle-hl");
     for (var k = 0; k < nodes.length; k++) {
       nodes[k].addEventListener("click", function (e) {
         e.preventDefault();
@@ -198,6 +168,7 @@
     window.spindle.currentHighlights(function (jsonStr) {
       var arr;
       try { arr = JSON.parse(jsonStr); } catch (e) { return; }
+      window.__spindleHighlights = arr || []; // for list jumps (see onScrollHighlight)
       if (!arr || !arr.length) return;
       // Apply later offsets first so earlier ones stay valid as marks (excluded
       // from the text walk) are inserted.
@@ -369,15 +340,30 @@
 
   // Scroll to a highlight: prefer its char-level mark, else its block tint —
   // whichever is currently visible in the active view.
+  function isVisible(el) { return !!(el && el.offsetParent !== null); }
+
+  // Jump to a highlight from the list. Highlights are only drawn on the side they
+  // were made, so the precise mark may not be present in the current view; in
+  // that case land on the highlight's block (the original block or its
+  // translation paragraph, whichever the current view shows).
   function onScrollHighlight(id, tries) {
-    var nodes = document.querySelectorAll('[data-hl-id="' + id + '"]');
-    var target = null;
-    for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].offsetParent !== null) { target = nodes[i]; break; }
-    }
-    if (!target && nodes.length) target = nodes[0];
+    tries = tries || 0;
+    var target = document.querySelector('mark.spindle-hl[data-hl-id="' + id + '"]');
+    if (!isVisible(target)) target = null;
     if (!target) {
-      if ((tries || 0) < 40) setTimeout(function () { onScrollHighlight(id, (tries || 0) + 1); }, 25);
+      var arr = window.__spindleHighlights || [];
+      var h = null;
+      for (var i = 0; i < arr.length; i++) if (arr[i].id === id) { h = arr[i]; break; }
+      if (h) {
+        var blk = blockByNumber(h.block);
+        var tr = (blk && blk.nextElementSibling &&
+                  blk.nextElementSibling.classList.contains("spindle-translation"))
+                   ? blk.nextElementSibling : null;
+        target = isVisible(blk) ? blk : (isVisible(tr) ? tr : null);
+      }
+    }
+    if (!target) {
+      if (tries < 40) setTimeout(function () { onScrollHighlight(id, tries + 1); }, 25);
       return;
     }
     target.scrollIntoView({ block: "center", inline: "center" });
