@@ -69,8 +69,8 @@ in a new window, so you can read several at once.
 
 - **Sidebar:** toggle the table-of-contents sidebar with the **☰ 目次** button.
 - **Highlight:** select text → pick a colour from the popup (which also offers
-  Copy and Translate). Click an existing highlight to copy it, change its colour,
-  edit its note, or delete it.
+  Copy, Translate, and Search the web). Click an existing highlight to copy it,
+  change its colour, edit its note, or delete it.
 - **Translation:** click **🌐**, choose a mode (original / bilingual /
   translation), set the model + target language, and press 再翻訳; or select
   text and choose **🌐 翻訳** to translate just that selection (the result popup
@@ -203,11 +203,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.2.6` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.2.7` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.2.6 && git push origin v0.2.6
+git tag v0.2.7 && git push origin v0.2.7
 ```
 
 ## Project layout

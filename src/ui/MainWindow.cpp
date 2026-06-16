@@ -23,6 +23,7 @@
 #include <QChildEvent>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QDesktopServices>
 #include <QGuiApplication>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -32,7 +33,7 @@
 #include <QHBoxLayout>
 #include <QHash>
 #include <QIcon>
-#include <QInputDialog>
+#include <QTextEdit>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -867,18 +868,21 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
     QAction *withNote = menu.addAction(QStringLiteral("＋ ノート付きで追加…"));
     QAction *translateAction = menu.addAction(QStringLiteral("🌐 翻訳"));
     QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
+    QAction *webSearchAction = menu.addAction(QStringLiteral("Web で検索"));
 
     QAction *chosen = menu.exec(QCursor::pos());
     if (!chosen)
         return;
     if (chosen == copyAction) {
         QGuiApplication::clipboard()->setText(text);
+    } else if (chosen == webSearchAction) {
+        const QString q = QString::fromUtf8(QUrl::toPercentEncoding(text.trimmed()));
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.google.com/search?q=") + q));
     } else if (chosen == translateAction) {
         translateSelection(text);
     } else if (chosen == withNote) {
         bool ok = false;
-        const QString note = QInputDialog::getMultiLineText(
-            this, QStringLiteral("ノート"), QStringLiteral("ノートを入力:"), QString(), &ok);
+        const QString note = promptNoteText(QStringLiteral("ノートを入力:"), QString(), &ok);
         if (ok)
             createHighlight(HighlightColor::Yellow, block, hside, effLang, offset, length, text, note);
     } else if (map.contains(chosen)) {
@@ -971,14 +975,38 @@ void MainWindow::setHighlightColor(const QString &id, HighlightColor color)
     afterHighlightsMutated();
 }
 
+QString MainWindow::promptNoteText(const QString &label, const QString &initial, bool *ok)
+{
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("ノート"));
+    QVBoxLayout *lay = new QVBoxLayout(&dlg);
+    lay->addWidget(new QLabel(label, &dlg));
+    QTextEdit *edit = new QTextEdit(&dlg);
+    edit->setAcceptRichText(false);
+    edit->setLineWrapMode(QTextEdit::WidgetWidth); // wrap to the editor width
+    edit->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    edit->setPlainText(initial);
+    edit->setMinimumSize(440, 180);
+    lay->addWidget(edit);
+    QDialogButtonBox *bb =
+        new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    lay->addWidget(bb);
+    edit->setFocus();
+    const bool accepted = dlg.exec() == QDialog::Accepted;
+    if (ok)
+        *ok = accepted;
+    return accepted ? edit->toPlainText() : QString();
+}
+
 void MainWindow::editHighlightNote(const QString &id)
 {
     Highlight *h = findHighlight(id);
     if (!h)
         return;
     bool ok = false;
-    const QString note = QInputDialog::getMultiLineText(
-        this, QStringLiteral("ノート"), QStringLiteral("ノートを編集:"), h->note, &ok);
+    const QString note = promptNoteText(QStringLiteral("ノートを編集:"), h->note, &ok);
     if (!ok)
         return;
     h->note = note.trimmed();

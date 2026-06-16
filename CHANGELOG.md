@@ -4,6 +4,16 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] - 2026-06-16
+
+### Added
+- **Search the web** — the selection menu has a 「Web で検索」 item that opens the
+  selected text in the default browser's search.
+
+### Changed
+- **Note editor wraps text** — the note add/edit dialog now word-wraps long
+  lines instead of scrolling horizontally.
+
 ## [0.2.6] - 2026-06-16
 
 ### Added

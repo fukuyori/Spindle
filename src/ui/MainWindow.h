@@ -113,6 +113,8 @@ private:
     void removeHighlightById(const QString &id);
     void setHighlightColor(const QString &id, HighlightColor color);
     void editHighlightNote(const QString &id);
+    // Multi-line note editor with word wrap (replaces QInputDialog::getMultiLineText).
+    QString promptNoteText(const QString &label, const QString &initial, bool *ok);
     Highlight *findHighlight(const QString &id);
     void renderHighlightsList();
     void persistHighlights();
