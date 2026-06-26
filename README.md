@@ -215,11 +215,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.3.1` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.3.2` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.3.1 && git push origin v0.3.1
+git tag v0.3.2 && git push origin v0.3.2
 ```
 
 ## Project layout
@@ -241,6 +241,10 @@ third_party/ vendored miniz
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the version history.
+
+## License
+
+Spindle is licensed under the [Apache License 2.0](LICENSE).
 
 ## Third-party
 

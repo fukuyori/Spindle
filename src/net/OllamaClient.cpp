@@ -81,14 +81,18 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
         base.chop(1);
     const QUrl url(base + QStringLiteral("/api/chat"));
 
+    const QString target = targetLang.trimmed().isEmpty()
+                               ? QStringLiteral("the requested target language")
+                               : targetLang.trimmed();
     QString system =
         QStringLiteral(
             "You are a careful reading assistant. Summarize the user's text. "
-            "The summary must be written only in %1, regardless of the source text's "
-            "language. Output only the summary. Keep important names, relationships, "
-            "events, and claims. Do not add facts that are not in the text. Use concise "
-            "bullet points when helpful.")
-            .arg(targetLang);
+            "Write every part of the summary only in %1, regardless of the source text's "
+            "language. If the source text is in another language, translate the summary "
+            "into %1 instead of answering in the source language. Output only the summary. "
+            "Keep important names, relationships, events, and claims. Do not add facts "
+            "that are not in the text. Use concise bullet points when helpful.")
+            .arg(target);
     if (!detailInstruction.trimmed().isEmpty())
         system += QStringLiteral(" ") + detailInstruction.trimmed();
 
@@ -101,8 +105,10 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
     QJsonArray messages;
     messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
                                 {QStringLiteral("content"), system}});
+    const QString user =
+        QStringLiteral("Summarize the following text in %1 only.\n\n%2").arg(target, text);
     messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
-                                {QStringLiteral("content"), text}});
+                                {QStringLiteral("content"), user}});
     body[QStringLiteral("messages")] = messages;
 
     QNetworkRequest request(url);

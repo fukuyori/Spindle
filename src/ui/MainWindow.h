@@ -150,6 +150,7 @@ private:
     QString summaryDetailInstruction() const;
     QString effectiveSummaryModel() const;
     void saveCurrentChapterSummary();
+    void translateCurrentSummary();
     void showTranslatePopup(const QString &text);
     void showSummaryDialog(const QString &title, const QString &text);
 
@@ -186,7 +187,9 @@ private:
     QTextEdit *m_summaryText = nullptr;
     QPushButton *m_summarySaveButton = nullptr;
     QPushButton *m_summaryRegenerateButton = nullptr;
+    QPushButton *m_summaryTranslateButton = nullptr;
     QString m_summaryMarkdown;
+    QString m_summaryPreTranslateTitle;
     bool m_summarySaveable = false;
     bool m_summaryTruncated = false;
     QString m_summaryChapterPath;

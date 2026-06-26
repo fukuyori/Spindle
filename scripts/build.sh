@@ -24,6 +24,16 @@ echo "==> Configuring (type=$BUILD_TYPE, prefix=${prefix:-<system>})"
 args=(-S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE")
 [ -n "$prefix" ] && args+=(-DCMAKE_PREFIX_PATH="$prefix")
 
+cache="$BUILD_DIR/CMakeCache.txt"
+if [ -f "$cache" ]; then
+  cache_root="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | tail -n 1)"
+  if [ -n "$cache_root" ] && [ "$cache_root" != "$ROOT" ]; then
+    echo "   (stale CMake cache from $cache_root — resetting $BUILD_DIR)"
+    rm -f "$cache"
+    rm -rf "$BUILD_DIR/CMakeFiles"
+  fi
+fi
+
 # Recent macOS SDKs dropped the legacy AGL framework that some Qt releases
 # (e.g. 6.8) still reference at link time. Provide a harmless stub so linking
 # succeeds; it is never loaded at runtime. (Newer Qt doesn't need this.)
@@ -36,6 +46,7 @@ if [ "$(uname)" = "Darwin" ]; then
     mkdir -p "$stub/AGL.framework"
     [ -f "$stub/AGL.framework/AGL" ] || printf 'void __spindle_agl_stub(void){}\n' \
       | clang -dynamiclib -x c - -install_name @rpath/AGL.framework/AGL \
+        -current_version 1.0 -compatibility_version 1.0 \
         -o "$stub/AGL.framework/AGL"
     args+=(-DCMAKE_EXE_LINKER_FLAGS="-F$stub")
     echo "   (this SDK has no AGL.framework — added a link-time stub)"

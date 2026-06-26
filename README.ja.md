@@ -205,11 +205,11 @@ pwsh scripts/package-windows-inno.ps1 -QtPrefix ... # → Inno Setup setup.exe
 - **macOS** → `.dmg`
 - **Windows** → 携帯版 `.zip` + NSIS `setup.exe`
 
-各実行で成果物がアップロードされます。`v0.3.1` のようなタグを push すると、
+各実行で成果物がアップロードされます。`v0.3.2` のようなタグを push すると、
 全パッケージを添付した GitHub Release も自動作成されます。
 
 ```sh
-git tag v0.3.1 && git push origin v0.3.1
+git tag v0.3.2 && git push origin v0.3.2
 ```
 
 ## プロジェクト構成
@@ -231,6 +231,10 @@ third_party/ vendor 化した miniz
 ## 変更履歴
 
 バージョンごとの変更点は [CHANGELOG.md](CHANGELOG.md) を参照してください。
+
+## ライセンス
+
+Spindle は [Apache License 2.0](LICENSE) でライセンスされています。
 
 ## サードパーティ
 

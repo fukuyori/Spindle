@@ -166,12 +166,25 @@ const Lang kLangs[] = {{"ja", "Japanese", "日本語"}, {"en", "English", "Engli
                        {"zh", "Chinese", "中文"},     {"ko", "Korean", "한국어"},
                        {"fr", "French", "Français"},  {"de", "German", "Deutsch"},
                        {"es", "Spanish", "Español"}};
+constexpr int kSummaryTranslateRequestId = -1001;
 
 QString targetLanguageName(const QString &code)
 {
     for (const Lang &l : kLangs)
         if (code == QLatin1String(l.code))
             return QString::fromUtf8(l.name);
+    return code;
+}
+
+QString targetLanguagePrompt(const QString &code)
+{
+    for (const Lang &l : kLangs) {
+        if (code == QLatin1String(l.code)) {
+            return QStringLiteral("%1 (%2, ISO code: %3)")
+                .arg(QString::fromUtf8(l.name), QString::fromUtf8(l.label),
+                     QString::fromUtf8(l.code));
+        }
+    }
     return code;
 }
 
@@ -1620,7 +1633,7 @@ void MainWindow::summarizeSelection(const QString &text)
     showSummaryDialog(QStringLiteral("選択範囲の要約 (%1)").arg(summaryDetailLabel()),
                       QStringLiteral("要約中…"));
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
-                               targetLanguageName(m_trTarget), src, summaryDetailInstruction());
+                               targetLanguagePrompt(m_trTarget), src, summaryDetailInstruction());
 }
 
 void MainWindow::summarizeCurrentChapter()
@@ -1687,7 +1700,7 @@ void MainWindow::generateCurrentChapterSummary(bool force)
                           ? QStringLiteral("要約中…（章が長いため先頭部分を要約します）")
                           : QStringLiteral("要約中…"));
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
-                               targetLanguageName(m_trTarget), text, summaryDetailInstruction());
+                               targetLanguagePrompt(m_trTarget), text, summaryDetailInstruction());
 }
 
 void MainWindow::openSavedCurrentChapterSummary()
@@ -1797,16 +1810,42 @@ void MainWindow::saveCurrentChapterSummary()
         m_summarySaveButton->setText(QStringLiteral("保存済み"));
 }
 
+void MainWindow::translateCurrentSummary()
+{
+    const QString src = m_summaryMarkdown.trimmed();
+    if (src.isEmpty())
+        return;
+
+    m_summaryPreTranslateTitle =
+        m_summaryDialog ? m_summaryDialog->windowTitle() : QStringLiteral("要約");
+    m_summarySaveable = false;
+    showSummaryDialog(QStringLiteral("要約を翻訳中 (%1)").arg(targetLanguageName(m_trTarget)),
+                      QStringLiteral("翻訳中…"));
+    m_summaryOllama->translate(m_trEndpoint, effectiveSummaryModel(),
+                               targetLanguagePrompt(m_trTarget), src, QString(),
+                               kSummaryTranslateRequestId);
+}
+
 void MainWindow::onSummaryFinished(int requestId, bool ok, const QString &result)
 {
-    Q_UNUSED(requestId);
     if (!m_summaryDialog || !m_summaryDialog->isVisible())
         return;
     if (!ok) {
         showSummaryDialog(m_summaryDialog->windowTitle(),
-                          QStringLiteral("⚠ 要約に失敗しました: ") + result);
+                          requestId == kSummaryTranslateRequestId
+                              ? QStringLiteral("⚠ 翻訳に失敗しました: ") + result
+                              : QStringLiteral("⚠ 要約に失敗しました: ") + result);
         return;
     }
+    if (requestId == kSummaryTranslateRequestId) {
+        m_summarySaveable = !m_summaryChapterPath.isEmpty();
+        const QString title = m_summaryPreTranslateTitle.isEmpty()
+                                  ? QStringLiteral("要約")
+                                  : m_summaryPreTranslateTitle;
+        showSummaryDialog(title, result);
+        return;
+    }
+
     const QString prefix =
         m_summaryTruncated ? QStringLiteral("※ 長いため先頭部分から要約しました。\n\n") : QString();
     m_summarySaveable = !m_summaryChapterPath.isEmpty();
@@ -1838,6 +1877,9 @@ void MainWindow::showSummaryDialog(const QString &title, const QString &text)
         m_summarySaveButton = buttons->addButton(QStringLiteral("保存"),
                                                  QDialogButtonBox::ActionRole);
         m_summarySaveButton->setEnabled(false);
+        m_summaryTranslateButton = buttons->addButton(QStringLiteral("翻訳"),
+                                                      QDialogButtonBox::ActionRole);
+        m_summaryTranslateButton->setEnabled(false);
         m_summaryRegenerateButton = buttons->addButton(QStringLiteral("再作成"),
                                                        QDialogButtonBox::ActionRole);
         m_summaryRegenerateButton->setEnabled(false);
@@ -1847,6 +1889,8 @@ void MainWindow::showSummaryDialog(const QString &title, const QString &text)
         });
         connect(m_summarySaveButton, &QPushButton::clicked, this,
                 &MainWindow::saveCurrentChapterSummary);
+        connect(m_summaryTranslateButton, &QPushButton::clicked, this,
+                &MainWindow::translateCurrentSummary);
         connect(m_summaryRegenerateButton, &QPushButton::clicked, this,
                 &MainWindow::regenerateCurrentChapterSummary);
         connect(buttons, &QDialogButtonBox::rejected, m_summaryDialog, &QDialog::close);
@@ -1856,6 +1900,7 @@ void MainWindow::showSummaryDialog(const QString &title, const QString &text)
             m_summaryDialog = nullptr;
             m_summaryText = nullptr;
             m_summarySaveButton = nullptr;
+            m_summaryTranslateButton = nullptr;
             m_summaryRegenerateButton = nullptr;
         });
     }
@@ -1868,6 +1913,13 @@ void MainWindow::showSummaryDialog(const QString &title, const QString &text)
     }
     if (m_summaryRegenerateButton)
         m_summaryRegenerateButton->setEnabled(!m_summaryChapterPath.isEmpty());
+    if (m_summaryTranslateButton)
+        m_summaryTranslateButton->setEnabled(!m_summaryMarkdown.trimmed().isEmpty()
+                                             && !m_summaryMarkdown.contains(
+                                                 QStringLiteral("要約中"))
+                                             && m_summaryMarkdown != QStringLiteral("翻訳中…")
+                                             && !m_summaryMarkdown.startsWith(
+                                                 QStringLiteral("⚠")));
     if (m_summaryText) {
         m_summaryText->setMarkdown(text);
         m_summaryText->moveCursor(QTextCursor::Start);
