@@ -9,11 +9,13 @@
 #include "epub/EpubBook.h"
 #include "epub/PathUtil.h"
 #include "model/HighlightStore.h"
+#include "model/SummaryStore.h"
 #include "net/OllamaClient.h"
 #include "web/Bridge.h"
 #include "web/EpubSchemeHandler.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QCoreApplication>
 #include <QCursor>
 #include <QDateTime>
@@ -35,6 +37,7 @@
 #include <QHash>
 #include <QIcon>
 #include <QTextEdit>
+#include <QTextCursor>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -66,6 +69,7 @@
 #include <QStyledItemDelegate>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -209,6 +213,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_trCacheSave->setInterval(1500);
     connect(m_trCacheSave, &QTimer::timeout, this, [this] { m_trCache.flush(); });
 
+    m_summaryDetail = static_cast<SummaryDetail>(
+        qBound(0, QSettings().value(QStringLiteral("summary/detail"), 1).toInt(), 2));
+
     buildUi();
     updateNavButtons();
     updateSidebarMode();
@@ -269,11 +276,16 @@ void MainWindow::showAboutDialog()
 
 void MainWindow::buildUi()
 {
+    menuBar()->setNativeMenuBar(true);
+
     QAction *openAction = new QAction(QStringLiteral("EPUB を開く…"), this);
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenTriggered);
     QMenu *fileMenu = menuBar()->addMenu(QStringLiteral("ファイル"));
     fileMenu->addAction(openAction);
+    m_recentEpubsMenu = fileMenu->addMenu(QStringLiteral("最近開いた EPUB"));
+    connect(m_recentEpubsMenu, &QMenu::aboutToShow, this, &MainWindow::updateRecentEpubsMenu);
+    updateRecentEpubsMenu();
 
     QMenu *hlMenu = menuBar()->addMenu(QStringLiteral("ハイライト"));
     hlMenu->addAction(QStringLiteral("Kindle ノートを読み込み…"), this,
@@ -298,28 +310,77 @@ void MainWindow::buildUi()
     trMenu->addAction(QStringLiteral("訳文 EPUB を書き出し…"), this,
                       [this] { exportTranslatedEpub(1); });
 
+    QMenu *summaryMenu = menuBar()->addMenu(QStringLiteral("要約"));
+    summaryMenu->addAction(QStringLiteral("現在の章を要約"), this,
+                           &MainWindow::summarizeCurrentChapter);
+    summaryMenu->addAction(QStringLiteral("現在の章を再要約"), this,
+                           &MainWindow::regenerateCurrentChapterSummary);
+    summaryMenu->addAction(QStringLiteral("保存済みの章要約を開く"), this,
+                           &MainWindow::openSavedCurrentChapterSummary);
+    summaryMenu->addAction(QStringLiteral("設定…"), this,
+                           &MainWindow::openSummarySettingsDialog);
+    summaryMenu->addSeparator();
+    QMenu *summaryDetailMenu = summaryMenu->addMenu(QStringLiteral("粒度"));
+    QActionGroup *summaryDetailGroup = new QActionGroup(this);
+    summaryDetailGroup->setExclusive(true);
+    const struct {
+        SummaryDetail detail;
+        const char *label;
+    } summaryDetails[] = {{SummaryDetail::Brief, "短め"},
+                          {SummaryDetail::Standard, "標準"},
+                          {SummaryDetail::Detailed, "詳しく"}};
+    for (const auto &item : summaryDetails) {
+        QAction *action = summaryDetailMenu->addAction(QString::fromUtf8(item.label));
+        action->setCheckable(true);
+        action->setChecked(m_summaryDetail == item.detail);
+        summaryDetailGroup->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [this, item] { setSummaryDetail(static_cast<int>(item.detail)); });
+    }
+
     QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
     helpMenu->addAction(QStringLiteral("Spindle について"), this, &MainWindow::showAboutDialog);
 
     QToolBar *toolbar = addToolBar(QStringLiteral("Main"));
     toolbar->setMovable(false);
-    QAction *sidebarAction = toolbar->addAction(QStringLiteral("☰ 目次"));
+    toolbar->setFloatable(false);
+    toolbar->setAllowedAreas(Qt::TopToolBarArea);
+    toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+
+    QAction *openToolbarAction = toolbar->addAction(QStringLiteral("開く"));
+    openToolbarAction->setToolTip(QStringLiteral("EPUB を開く"));
+    connect(openToolbarAction, &QAction::triggered, this, &MainWindow::onOpenTriggered);
+    toolbar->addSeparator();
+
+    QAction *sidebarAction = toolbar->addAction(QStringLiteral("目次"));
     sidebarAction->setCheckable(true);
     sidebarAction->setChecked(true);
     sidebarAction->setToolTip(QStringLiteral("目次サイドバーの表示/非表示"));
     connect(sidebarAction, &QAction::toggled, this,
             [this](bool on) { if (m_sidebar) m_sidebar->setVisible(on); });
     toolbar->addSeparator();
-    m_prevAction = toolbar->addAction(QStringLiteral("‹ 前"));
-    m_nextAction = toolbar->addAction(QStringLiteral("次 ›"));
+    m_prevAction = toolbar->addAction(QStringLiteral("←"));
+    m_prevAction->setToolTip(QStringLiteral("前の章"));
+    m_nextAction = toolbar->addAction(QStringLiteral("→"));
+    m_nextAction->setToolTip(QStringLiteral("次の章"));
     connect(m_prevAction, &QAction::triggered, this, &MainWindow::previousChapter);
     connect(m_nextAction, &QAction::triggered, this, &MainWindow::nextChapter);
     toolbar->addSeparator();
-    toolbar->addAction(QStringLiteral("🌐 翻訳"), this, &MainWindow::openTranslateDialog);
+    QToolButton *aiButton = new QToolButton(toolbar);
+    aiButton->setText(QStringLiteral("AI"));
+    aiButton->setToolTip(QStringLiteral("翻訳と要約"));
+    aiButton->setPopupMode(QToolButton::InstantPopup);
+    QMenu *aiMenu = new QMenu(aiButton);
+    aiMenu->addAction(QStringLiteral("翻訳設定…"), this, &MainWindow::openTranslateDialog);
+    aiMenu->addAction(QStringLiteral("現在の章を要約"), this, &MainWindow::summarizeCurrentChapter);
+    aiMenu->addAction(QStringLiteral("要約設定…"), this, &MainWindow::openSummarySettingsDialog);
+    aiButton->setMenu(aiMenu);
+    toolbar->addWidget(aiButton);
+    toolbar->addSeparator();
     toolbar->addAction(QStringLiteral("A−"), this, &MainWindow::decreaseFont);
     toolbar->addAction(QStringLiteral("A+"), this, &MainWindow::increaseFont);
-    toolbar->addAction(QStringLiteral("◐ テーマ"), this, &MainWindow::cycleTheme);
-    QAction *xmlAction = toolbar->addAction(QStringLiteral("</> XML"));
+    toolbar->addAction(QStringLiteral("テーマ"), this, &MainWindow::cycleTheme);
+    QAction *xmlAction = toolbar->addAction(QStringLiteral("XML"));
     xmlAction->setCheckable(true);
     xmlAction->setToolTip(QStringLiteral("章の XHTML ソースを表示"));
     connect(xmlAction, &QAction::toggled, this, &MainWindow::toggleXmlView);
@@ -446,10 +507,13 @@ void MainWindow::setupWebChannel()
     m_selectionOllama = new OllamaClient(this);
     connect(m_selectionOllama, &OllamaClient::finished, this,
             &MainWindow::onSelectionTranslated);
+    m_summaryOllama = new OllamaClient(this);
+    connect(m_summaryOllama, &OllamaClient::finished, this, &MainWindow::onSummaryFinished);
 
     QSettings settings;
     m_trTarget = settings.value(QStringLiteral("translate/target"), m_trTarget).toString();
     m_trModel = settings.value(QStringLiteral("translate/model"), m_trModel).toString();
+    m_summaryModel = settings.value(QStringLiteral("summary/model")).toString().trimmed();
     m_trEndpoint = settings.value(QStringLiteral("translate/endpoint"), m_trEndpoint).toString();
     m_trColor = settings.value(QStringLiteral("translate/color")).toString();
 
@@ -512,6 +576,73 @@ void MainWindow::onOpenTriggered()
         openEpubSmart(path);
 }
 
+QStringList MainWindow::recentEpubs() const
+{
+    return QSettings().value(QStringLiteral("recent/epubs")).toStringList();
+}
+
+void MainWindow::addRecentEpub(const QString &filePath)
+{
+    const QFileInfo info(filePath);
+    const QString path = info.exists() ? info.absoluteFilePath() : filePath;
+    if (path.isEmpty())
+        return;
+
+    QStringList next;
+    next.append(path);
+    for (const QString &existing : recentEpubs()) {
+        if (existing.compare(path, Qt::CaseInsensitive) == 0)
+            continue;
+        next.append(existing);
+        if (next.size() >= 8)
+            break;
+    }
+    QSettings().setValue(QStringLiteral("recent/epubs"), next);
+    updateRecentEpubsMenu();
+}
+
+void MainWindow::removeRecentEpub(const QString &filePath)
+{
+    QStringList next;
+    for (const QString &existing : recentEpubs()) {
+        if (existing.compare(filePath, Qt::CaseInsensitive) != 0)
+            next.append(existing);
+    }
+    QSettings().setValue(QStringLiteral("recent/epubs"), next);
+    updateRecentEpubsMenu();
+}
+
+void MainWindow::updateRecentEpubsMenu()
+{
+    if (!m_recentEpubsMenu)
+        return;
+
+    m_recentEpubsMenu->clear();
+    const QStringList paths = recentEpubs();
+    if (paths.isEmpty()) {
+        QAction *empty = m_recentEpubsMenu->addAction(QStringLiteral("(履歴なし)"));
+        empty->setEnabled(false);
+        return;
+    }
+
+    int index = 1;
+    for (const QString &path : paths) {
+        const QFileInfo info(path);
+        const QString name = info.fileName().isEmpty() ? path : info.fileName();
+        QAction *action = m_recentEpubsMenu->addAction(QStringLiteral("%1. %2").arg(index++).arg(name));
+        action->setToolTip(path);
+        connect(action, &QAction::triggered, this, [this, path] {
+            if (!QFileInfo::exists(path)) {
+                QMessageBox::warning(this, QStringLiteral("Spindle"),
+                                     QStringLiteral("履歴の EPUB が見つかりません:\n%1").arg(path));
+                removeRecentEpub(path);
+                return;
+            }
+            openEpubSmart(path);
+        });
+    }
+}
+
 bool MainWindow::openEpub(const QString &filePath)
 {
     auto book = std::make_unique<EpubBook>();
@@ -544,6 +675,7 @@ bool MainWindow::openEpub(const QString &filePath)
     renderHighlightsList();
     displayChapter(0);
     showSidebarTab(0);
+    addRecentEpub(filePath);
     return true;
 }
 
@@ -911,6 +1043,7 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
     menu.addSeparator();
     QAction *withNote = menu.addAction(QStringLiteral("＋ ノート付きで追加…"));
     QAction *translateAction = menu.addAction(QStringLiteral("🌐 翻訳"));
+    QAction *summaryAction = menu.addAction(QStringLiteral("要約"));
     QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
     QAction *webSearchAction = menu.addAction(QStringLiteral("Web で検索"));
 
@@ -923,6 +1056,8 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
         openWebSearch(text);
     } else if (chosen == translateAction) {
         translateSelection(text);
+    } else if (chosen == summaryAction) {
+        summarizeSelection(text);
     } else if (chosen == withNote) {
         bool ok = false;
         const QString note = promptNoteText(QStringLiteral("ノートを入力:"), QString(), &ok);
@@ -1473,6 +1608,275 @@ void MainWindow::onSelectionTranslated(int requestId, bool ok, const QString &re
     showTranslatePopup(ok ? result : QStringLiteral("⚠ 翻訳に失敗しました: ") + result);
 }
 
+void MainWindow::summarizeSelection(const QString &text)
+{
+    const QString src = text.trimmed();
+    if (src.isEmpty())
+        return;
+    m_summarySaveable = false;
+    m_summaryChapterPath.clear();
+    m_summaryChapterTitle.clear();
+    m_summaryTruncated = false;
+    showSummaryDialog(QStringLiteral("選択範囲の要約 (%1)").arg(summaryDetailLabel()),
+                      QStringLiteral("要約中…"));
+    m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
+                               targetLanguageName(m_trTarget), src, summaryDetailInstruction());
+}
+
+void MainWindow::summarizeCurrentChapter()
+{
+    generateCurrentChapterSummary(false);
+}
+
+void MainWindow::regenerateCurrentChapterSummary()
+{
+    generateCurrentChapterSummary(true);
+}
+
+void MainWindow::generateCurrentChapterSummary(bool force)
+{
+    if (!m_book || m_currentChapter < 0) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("EPUB を開いてから要約してください。"));
+        return;
+    }
+
+    const Chapter &chapter = m_book->chapters().at(m_currentChapter);
+    if (!force) {
+        const ChapterSummary saved =
+            summary_store::find(summary_store::load(m_epubPath), chapter.path, m_trTarget,
+                                summaryDetailKey());
+        if (!saved.summaryMarkdown.isEmpty()) {
+            m_summaryChapterPath = chapter.path;
+            m_summaryChapterTitle = chapter.label;
+            m_summarySaveable = true;
+            m_summaryTruncated = false;
+            showSummaryDialog(QStringLiteral("保存済みの章要約 (%1)").arg(summaryDetailLabel()),
+                              saved.summaryMarkdown);
+            if (m_summarySaveButton)
+                m_summarySaveButton->setText(QStringLiteral("保存済み"));
+            return;
+        }
+    }
+
+    ensureChapterTexts();
+    const QString chapterPath = chapter.path;
+    QString text;
+    for (const ChapterText &chapter : m_chapterTexts) {
+        if (chapter.path == chapterPath) {
+            text = chapter.normalizedBody.trimmed();
+            break;
+        }
+    }
+    if (text.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("この章には要約できる本文がありません。"));
+        return;
+    }
+
+    static constexpr int kMaxSummaryInputChars = 60000;
+    m_summarySaveable = false;
+    m_summaryChapterPath = chapterPath;
+    m_summaryChapterTitle = chapter.label;
+    m_summaryTruncated = text.size() > kMaxSummaryInputChars;
+    if (m_summaryTruncated)
+        text = text.left(kMaxSummaryInputChars);
+
+    showSummaryDialog(QStringLiteral("章の要約 (%1)").arg(summaryDetailLabel()),
+                      m_summaryTruncated
+                          ? QStringLiteral("要約中…（章が長いため先頭部分を要約します）")
+                          : QStringLiteral("要約中…"));
+    m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
+                               targetLanguageName(m_trTarget), text, summaryDetailInstruction());
+}
+
+void MainWindow::openSavedCurrentChapterSummary()
+{
+    if (!m_book || m_currentChapter < 0) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("EPUB を開いてから保存済み要約を選択してください。"));
+        return;
+    }
+
+    const Chapter &chapter = m_book->chapters().at(m_currentChapter);
+    const ChapterSummary summary =
+        summary_store::find(summary_store::load(m_epubPath), chapter.path, m_trTarget,
+                            summaryDetailKey());
+    if (summary.summaryMarkdown.isEmpty()) {
+        QMessageBox::information(
+            this, QStringLiteral("Spindle"),
+            QStringLiteral("現在の章には、%1 / %2 の保存済み要約がありません。")
+                .arg(targetLanguageName(m_trTarget), summaryDetailLabel()));
+        return;
+    }
+
+    m_summaryChapterPath = chapter.path;
+    m_summaryChapterTitle = chapter.label;
+    m_summarySaveable = true;
+    m_summaryTruncated = false;
+    showSummaryDialog(QStringLiteral("保存済みの章要約 (%1)").arg(summaryDetailLabel()),
+                      summary.summaryMarkdown);
+    if (m_summarySaveButton)
+        m_summarySaveButton->setText(QStringLiteral("保存済み"));
+}
+
+void MainWindow::setSummaryDetail(int detail)
+{
+    const int bounded = qBound(0, detail, 2);
+    m_summaryDetail = static_cast<SummaryDetail>(bounded);
+    QSettings().setValue(QStringLiteral("summary/detail"), bounded);
+}
+
+QString MainWindow::summaryDetailLabel() const
+{
+    switch (m_summaryDetail) {
+    case SummaryDetail::Brief: return QStringLiteral("短め");
+    case SummaryDetail::Standard: return QStringLiteral("標準");
+    case SummaryDetail::Detailed: return QStringLiteral("詳しく");
+    }
+    return QStringLiteral("標準");
+}
+
+QString MainWindow::summaryDetailKey() const
+{
+    switch (m_summaryDetail) {
+    case SummaryDetail::Brief: return QStringLiteral("brief");
+    case SummaryDetail::Standard: return QStringLiteral("standard");
+    case SummaryDetail::Detailed: return QStringLiteral("detailed");
+    }
+    return QStringLiteral("standard");
+}
+
+QString MainWindow::summaryDetailInstruction() const
+{
+    switch (m_summaryDetail) {
+    case SummaryDetail::Brief:
+        return QStringLiteral(
+            "Make it brief: 3 to 5 compact bullet points, focusing only on the main points.");
+    case SummaryDetail::Standard:
+        return QStringLiteral(
+            "Use a balanced level of detail: about 6 to 10 bullet points covering the main "
+            "claims, events, and relationships.");
+    case SummaryDetail::Detailed:
+        return QStringLiteral(
+            "Make it detailed: preserve important named entities, chronology, cause and "
+            "effect, and notable nuance. Use section headings and bullet points when helpful.");
+    }
+    return {};
+}
+
+QString MainWindow::effectiveSummaryModel() const
+{
+    return m_summaryModel.isEmpty() ? m_trModel : m_summaryModel;
+}
+
+void MainWindow::saveCurrentChapterSummary()
+{
+    if (!m_summarySaveable || m_epubPath.isEmpty() || m_summaryChapterPath.isEmpty()
+        || m_summaryMarkdown.trimmed().isEmpty()) {
+        return;
+    }
+
+    QVector<ChapterSummary> summaries = summary_store::load(m_epubPath);
+    const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+
+    ChapterSummary summary;
+    summary.chapter = m_summaryChapterPath;
+    summary.chapterTitle = m_summaryChapterTitle;
+    summary.targetLang = m_trTarget;
+    summary.detail = summaryDetailKey();
+    summary.model = effectiveSummaryModel();
+    summary.summaryMarkdown = m_summaryMarkdown;
+    summary.createdAt = now;
+    summary.updatedAt = now;
+
+    summary_store::upsert(summaries, summary);
+    summary_store::save(m_epubPath, summaries);
+
+    if (m_summarySaveButton)
+        m_summarySaveButton->setText(QStringLiteral("保存済み"));
+}
+
+void MainWindow::onSummaryFinished(int requestId, bool ok, const QString &result)
+{
+    Q_UNUSED(requestId);
+    if (!m_summaryDialog || !m_summaryDialog->isVisible())
+        return;
+    if (!ok) {
+        showSummaryDialog(m_summaryDialog->windowTitle(),
+                          QStringLiteral("⚠ 要約に失敗しました: ") + result);
+        return;
+    }
+    const QString prefix =
+        m_summaryTruncated ? QStringLiteral("※ 長いため先頭部分から要約しました。\n\n") : QString();
+    m_summarySaveable = !m_summaryChapterPath.isEmpty();
+    showSummaryDialog(m_summaryDialog->windowTitle(), prefix + result);
+}
+
+void MainWindow::showSummaryDialog(const QString &title, const QString &text)
+{
+    if (!m_summaryDialog) {
+        m_summaryDialog = new QDialog(this);
+        m_summaryDialog->setAttribute(Qt::WA_DeleteOnClose);
+        m_summaryDialog->resize(680, 520);
+
+        QVBoxLayout *layout = new QVBoxLayout(m_summaryDialog);
+        layout->setContentsMargins(14, 14, 14, 14);
+        layout->setSpacing(10);
+
+        m_summaryText = new QTextEdit(m_summaryDialog);
+        m_summaryText->setReadOnly(true);
+        m_summaryText->setAcceptRichText(true);
+        m_summaryText->setLineWrapMode(QTextEdit::WidgetWidth);
+        m_summaryText->setTextInteractionFlags(Qt::TextSelectableByMouse |
+                                               Qt::TextSelectableByKeyboard);
+        layout->addWidget(m_summaryText);
+
+        QDialogButtonBox *buttons = new QDialogButtonBox(m_summaryDialog);
+        QPushButton *copyButton = buttons->addButton(QStringLiteral("コピー"),
+                                                     QDialogButtonBox::ActionRole);
+        m_summarySaveButton = buttons->addButton(QStringLiteral("保存"),
+                                                 QDialogButtonBox::ActionRole);
+        m_summarySaveButton->setEnabled(false);
+        m_summaryRegenerateButton = buttons->addButton(QStringLiteral("再作成"),
+                                                       QDialogButtonBox::ActionRole);
+        m_summaryRegenerateButton->setEnabled(false);
+        buttons->addButton(QDialogButtonBox::Close);
+        connect(copyButton, &QPushButton::clicked, this, [this] {
+            QGuiApplication::clipboard()->setText(m_summaryMarkdown);
+        });
+        connect(m_summarySaveButton, &QPushButton::clicked, this,
+                &MainWindow::saveCurrentChapterSummary);
+        connect(m_summaryRegenerateButton, &QPushButton::clicked, this,
+                &MainWindow::regenerateCurrentChapterSummary);
+        connect(buttons, &QDialogButtonBox::rejected, m_summaryDialog, &QDialog::close);
+        layout->addWidget(buttons);
+
+        connect(m_summaryDialog, &QObject::destroyed, this, [this] {
+            m_summaryDialog = nullptr;
+            m_summaryText = nullptr;
+            m_summarySaveButton = nullptr;
+            m_summaryRegenerateButton = nullptr;
+        });
+    }
+
+    m_summaryDialog->setWindowTitle(title);
+    m_summaryMarkdown = text;
+    if (m_summarySaveButton) {
+        m_summarySaveButton->setText(QStringLiteral("保存"));
+        m_summarySaveButton->setEnabled(m_summarySaveable && !m_summaryMarkdown.trimmed().isEmpty());
+    }
+    if (m_summaryRegenerateButton)
+        m_summaryRegenerateButton->setEnabled(!m_summaryChapterPath.isEmpty());
+    if (m_summaryText) {
+        m_summaryText->setMarkdown(text);
+        m_summaryText->moveCursor(QTextCursor::Start);
+    }
+    m_summaryDialog->show();
+    m_summaryDialog->raise();
+    m_summaryDialog->activateWindow();
+}
+
 void MainWindow::showTranslatePopup(const QString &text)
 {
     if (!m_translatePopup) {
@@ -1491,6 +1895,43 @@ void MainWindow::showTranslatePopup(const QString &text)
     m_translatePopup->move(QCursor::pos() + QPoint(8, 14));
     m_translatePopup->show();
     m_translatePopup->setFocus(); // ensure it receives the Escape key
+}
+
+void MainWindow::openSummarySettingsDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("要約設定 (Ollama)"));
+    QFormLayout *form = new QFormLayout(&dialog);
+
+    QLineEdit *modelEdit = new QLineEdit(m_summaryModel, &dialog);
+    modelEdit->setPlaceholderText(m_trModel);
+    form->addRow(QStringLiteral("要約モデル"), modelEdit);
+
+    QLabel *hint = new QLabel(QStringLiteral("未入力の場合は翻訳モデルを使用します。"), &dialog);
+    hint->setWordWrap(true);
+    form->addRow(hint);
+
+    QDialogButtonBox *buttons =
+        new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Save)->setText(QStringLiteral("保存"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("閉じる"));
+    form->addRow(buttons);
+
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    connect(&dialog, &QDialog::accepted, this, [&]() {
+        const QString model = modelEdit->text().trimmed();
+        m_summaryModel = model;
+        QSettings settings;
+        if (m_summaryModel.isEmpty()) {
+            settings.remove(QStringLiteral("summary/model"));
+        } else {
+            settings.setValue(QStringLiteral("summary/model"), m_summaryModel);
+        }
+    });
+
+    dialog.exec();
 }
 
 void MainWindow::openTranslateDialog()
@@ -1533,7 +1974,7 @@ void MainWindow::openTranslateDialog()
 
     form->addRow(QStringLiteral("表示モード"), modeBox);
     form->addRow(QStringLiteral("翻訳先"), targetBox);
-    form->addRow(QStringLiteral("モデル"), modelEdit);
+    form->addRow(QStringLiteral("翻訳モデル"), modelEdit);
     form->addRow(QStringLiteral("エンドポイント"), endpointEdit);
     form->addRow(QStringLiteral("訳文の色"), colorBox);
 

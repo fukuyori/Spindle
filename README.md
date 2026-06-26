@@ -21,7 +21,8 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Reading controls** — chapter navigation, font zoom, a font picker that can
   override the book's own fonts, light / sepia / dark themes, and a collapsible
   table-of-contents sidebar. The theme, window size, and translation view are
-  restored on the next launch.
+  restored on the next launch. The File menu keeps the 8 most recently opened
+  EPUBs for quick reopening.
 - **Full-text search** across the whole book with chapter-grouped snippets and
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
@@ -42,6 +43,11 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   requests in parallel. Results are **cached per book and language** next to the
   EPUB, so re-reading is instant. When the book is already in the target language
   the view stays original (translation is disabled).
+- **Local AI summaries** via Ollama — summarize the current chapter or selected
+  text in the translation target language. Chapter summaries can be reopened
+  from a sidecar file, regenerated on demand, rendered as Markdown, and saved at
+  brief / standard / detailed levels with a summary model separate from the
+  translation model.
 - **Translation glossary** — an optional `<book>.glossary.json` fixes the
   target wording of chosen terms (names, jargon) for consistent translations.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
@@ -67,11 +73,11 @@ in a new window, so you can read several at once.
 | Previous chapter | `←` |
 | Focus search | `Cmd` / `Ctrl` + `F` |
 
-- **Sidebar:** toggle the table-of-contents sidebar with the **☰ 目次** button.
+- **Sidebar:** toggle the table-of-contents sidebar with the **目次** button.
 - **Highlight:** select text → pick a colour from the popup (which also offers
-  Copy, Translate, and Search the web). Click an existing highlight to copy it,
-  search it on the web, change its colour, edit its note, or delete it.
-- **Translation:** click **🌐**, choose a mode (original / bilingual /
+  Copy, Translate, Summarize, and Search the web). Click an existing highlight
+  to copy it, search it on the web, change its colour, edit its note, or delete it.
+- **Translation:** choose **AI → 翻訳設定…**, choose a mode (original / bilingual /
   translation), set the model + target language, and press 再翻訳; or select
   text and choose **🌐 翻訳** to translate just that selection (the result popup
   closes on Escape or an outside click). Requires a running Ollama instance with
@@ -86,10 +92,14 @@ in a new window, so you can read several at once.
     ```
     Spindle's default endpoint `http://localhost:11434` then works unchanged. On a
     single GPU the gain is partial (both requests share it), not a full 2×.
+- **Summary:** choose **AI → 現在の章を要約** or **要約 → 現在の章を要約**.
+  Existing saved summaries for the current chapter, target language, and detail
+  level are opened immediately; use **現在の章を再要約** to regenerate. The
+  summary model is configured from **要約 → 設定…**.
 - **Export a translated book:** **翻訳 → 対訳 EPUB を書き出し / 訳文 EPUB を書き出し**
   builds a new `.epub` from the cached translations (any not-yet-translated
   paragraphs are translated first, with a cancelable progress dialog).
-- **Source view:** the **</> XML** button shows the chapter's raw XHTML.
+- **Source view:** the **XML** button shows the chapter's raw XHTML.
 
 ### Sidecar files
 
@@ -102,6 +112,7 @@ For a book `Foo.epub`, files are named after the base name `Foo`:
 | `<book>.highlights.json` | highlights & notes |
 | `<book>.<lang>.json` | translation cache for a target language (e.g. `Foo.ja.json`) |
 | `<book>.glossary.json` | optional glossary (you create/edit this) |
+| `<book>.summaries.json` | saved chapter summaries |
 
 #### Glossary format
 
@@ -182,6 +193,7 @@ for distribution (output in `dist/`):
 ./scripts/package-macos.sh                       # → Spindle-<ver>-macOS.dmg
 ./scripts/package-linux.sh                       # → AppImage + .deb / .tar.gz
 pwsh scripts/package-windows.ps1 -QtPrefix ...   # → portable .zip (+ NSIS setup.exe)
+pwsh scripts/package-windows-inno.ps1 -QtPrefix ... # → Inno Setup setup.exe
 ```
 
 The deploy tools bundle the Qt WebEngine runtime so the app is self-contained.
@@ -203,11 +215,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.3.0` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.3.1` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.3.0 && git push origin v0.3.0
+git tag v0.3.1 && git push origin v0.3.1
 ```
 
 ## Project layout
@@ -216,9 +228,9 @@ git tag v0.3.0 && git push origin v0.3.0
 src/
 ├── epub/    ZIP (miniz) + EPUB parsing (OPF/spine/nav/NCX), path utilities
 ├── core/    chapter text, search, Kindle matcher, Markdown, Aozora export
-├── model/   highlight model + JSON persistence
+├── model/   highlight / summary models + JSON persistence
 ├── web/     epub:// scheme handler, QWebChannel bridge
-├── net/     Ollama translation client
+├── net/     Ollama translation / summary client
 └── ui/      main window (QWebEngineView reader + sidebar/toolbar)
 resources/   reader.js (injected), app icon, Qt resource file
 packaging/   Linux .desktop entry

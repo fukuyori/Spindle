@@ -17,6 +17,9 @@ public:
     // to the exact request even when several runs overlap.
     void translate(const QString &endpoint, const QString &model, const QString &targetLang,
                    const QString &text, const QString &glossary = QString(), int requestId = 0);
+    void summarize(const QString &endpoint, const QString &model, const QString &targetLang,
+                   const QString &text, const QString &detailInstruction = QString(),
+                   int requestId = 0);
 
 signals:
     void finished(int requestId, bool ok, const QString &result);

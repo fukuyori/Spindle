@@ -10,15 +10,18 @@
 #include <QMainWindow>
 #include <QPair>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <memory>
 
 class EpubBook;
 class EpubSchemeHandler;
 class QFontComboBox;
+class QDialog;
 class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
+class QMenu;
 class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -28,6 +31,7 @@ class QStackedWidget;
 class QTimer;
 class QWebEngineView;
 class QWebChannel;
+class QTextEdit;
 class Bridge;
 class OllamaClient;
 
@@ -74,9 +78,11 @@ private slots:
     void onWebSelection(int block, const QString &side, const QString &lang, int offset,
                         int length, const QString &text);
     void openTranslateDialog();
+    void openSummarySettingsDialog();
     void onBlocksReady(const QString &json);
     void onOllamaFinished(int requestId, bool ok, const QString &result);
     void onSelectionTranslated(int requestId, bool ok, const QString &result);
+    void onSummaryFinished(int requestId, bool ok, const QString &result);
     void onMarkClicked(const QString &id);
     void exportHighlightsMarkdown();
     void exportHighlightsJson();
@@ -92,6 +98,10 @@ private:
     QString translationColor() const; // resolve m_trColor for the current theme ("" = none)
     static bool mimeHasEpub(const class QMimeData *mime);
     void openEpubsFromMime(const class QMimeData *mime);
+    QStringList recentEpubs() const;
+    void addRecentEpub(const QString &filePath);
+    void removeRecentEpub(const QString &filePath);
+    void updateRecentEpubsMenu();
     void populateToc();
     void addTocItems(const QVector<TocItem> &items, QTreeWidgetItem *parent);
     void displayChapter(int index, const QString &fragment = QString());
@@ -129,10 +139,23 @@ private:
     // i.e. translating it into that language is a no-op.
     bool isBookLanguage(const QString &targetCode) const;
     void translateSelection(const QString &text);
+    void summarizeSelection(const QString &text);
+    void summarizeCurrentChapter();
+    void regenerateCurrentChapterSummary();
+    void openSavedCurrentChapterSummary();
+    void generateCurrentChapterSummary(bool force);
+    void setSummaryDetail(int detail);
+    QString summaryDetailLabel() const;
+    QString summaryDetailKey() const;
+    QString summaryDetailInstruction() const;
+    QString effectiveSummaryModel() const;
+    void saveCurrentChapterSummary();
     void showTranslatePopup(const QString &text);
+    void showSummaryDialog(const QString &title, const QString &text);
 
     enum class Theme { Light, Sepia, Dark };
     enum class TranslateView { Original, Bilingual, Translation };
+    enum class SummaryDetail { Brief, Standard, Detailed };
 
     std::unique_ptr<EpubBook> m_book;
     QString m_bookId;
@@ -157,11 +180,23 @@ private:
     Bridge *m_bridge = nullptr;
     OllamaClient *m_ollama = nullptr;
     OllamaClient *m_selectionOllama = nullptr; // ad-hoc selection translation
+    OllamaClient *m_summaryOllama = nullptr;   // ad-hoc selection/chapter summary
     QLabel *m_translatePopup = nullptr;
+    QDialog *m_summaryDialog = nullptr;
+    QTextEdit *m_summaryText = nullptr;
+    QPushButton *m_summarySaveButton = nullptr;
+    QPushButton *m_summaryRegenerateButton = nullptr;
+    QString m_summaryMarkdown;
+    bool m_summarySaveable = false;
+    bool m_summaryTruncated = false;
+    QString m_summaryChapterPath;
+    QString m_summaryChapterTitle;
+    SummaryDetail m_summaryDetail = SummaryDetail::Standard;
 
     TranslateView m_translateView = TranslateView::Original;
     QString m_trTarget = QStringLiteral("ja");
     QString m_trModel = QStringLiteral("qwen2.5");
+    QString m_summaryModel;
     QString m_trEndpoint = QStringLiteral("http://localhost:11434");
     QString m_trColor; // translation text color: ""=none, preset key, or "#rrggbb"
     QVector<QPair<int, QString>> m_trQueue;
@@ -184,6 +219,7 @@ private:
     Glossary m_trGlossary;
     QTimer *m_trCacheSave = nullptr;
     QTreeWidget *m_toc = nullptr;
+    QMenu *m_recentEpubsMenu = nullptr;
     QListWidget *m_highlightsList = nullptr;
     QListWidget *m_searchResults = nullptr;
     QWidget *m_sidebar = nullptr;

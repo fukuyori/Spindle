@@ -4,6 +4,29 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-06-26
+
+### Added
+- **Summaries via Ollama** — summarize the current chapter from the Summary
+  menu or compact AI toolbar button, or summarize selected text from the selection
+  context menu. Summary results open in a resizable, scrollable dialog with a
+  copy button and render Markdown returned by the model.
+- **Summary detail setting** — choose brief, standard, or detailed summaries
+  from the Summary menu; the choice is saved for the next run.
+- **Separate summary model setting** — the Summary menu now has its own model
+  setting, so changing the summary model does not trigger retranslation.
+- **Cleaner reader toolbar** — duplicate translation and summary toolbar items
+  are grouped under a compact AI button, while the native menu bar remains
+  available on macOS.
+- **Inno Setup packaging script** — Windows installers can now be built with
+  `scripts/package-windows-inno.ps1`.
+- **Chapter summary sidecars** — chapter summaries can be saved and reopened
+  from `<book>.summaries.json`; saved summaries are keyed by chapter, target
+  language, and summary detail. Running chapter summary now opens an existing
+  saved summary when available, with an explicit re-create action for regenerating it.
+- **Recent EPUB history** — the File menu now keeps the last 8 successfully
+  opened EPUB files for quick reopening.
+
 ## [0.3.0] - 2026-06-26
 
 ### Added
@@ -217,6 +240,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
 - Cross-platform build & packaging scripts (macOS `.dmg`, Linux AppImage /
   `.deb`, Windows `.zip` / NSIS installer) and a GitHub Actions release workflow.
 
+[0.3.1]: https://github.com/fukuyori/Spindle/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/fukuyori/Spindle/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/fukuyori/Spindle/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/fukuyori/Spindle/compare/v0.2.6...v0.2.7
