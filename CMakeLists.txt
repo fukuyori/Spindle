@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.2.8 LANGUAGES C CXX)
+project(Spindle VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -89,6 +89,10 @@ qt_add_executable(spindle
 set_target_properties(spindle PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
 
 target_include_directories(spindle PRIVATE src)
+
+target_compile_definitions(spindle PRIVATE
+  SPINDLE_VERSION="${PROJECT_VERSION}"
+)
 
 target_link_libraries(spindle PRIVATE
   Qt6::Widgets

@@ -46,6 +46,7 @@ int main(int argc, char *argv[])
     SpindleApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Spindle"));
     app.setOrganizationName(QStringLiteral("Spindle"));
+    app.setApplicationVersion(QStringLiteral(SPINDLE_VERSION));
     app.setWindowIcon(QIcon(QStringLiteral(":/spindle.png")));
 
     // One shared scheme handler on the default profile serves every window's book.

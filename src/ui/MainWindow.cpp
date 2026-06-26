@@ -14,6 +14,7 @@
 #include "web/EpubSchemeHandler.h"
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QCursor>
 #include <QDateTime>
 #include <QFile>
@@ -259,6 +260,13 @@ void MainWindow::openEpubSmart(const QString &filePath)
         openEpub(filePath);
 }
 
+void MainWindow::showAboutDialog()
+{
+    QMessageBox::about(this, QStringLiteral("Spindle について"),
+                       QStringLiteral("<h3>Spindle</h3><p>バージョン %1</p>")
+                           .arg(QCoreApplication::applicationVersion()));
+}
+
 void MainWindow::buildUi()
 {
     QAction *openAction = new QAction(QStringLiteral("EPUB を開く…"), this);
@@ -289,6 +297,9 @@ void MainWindow::buildUi()
                       [this] { exportTranslatedEpub(0); });
     trMenu->addAction(QStringLiteral("訳文 EPUB を書き出し…"), this,
                       [this] { exportTranslatedEpub(1); });
+
+    QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
+    helpMenu->addAction(QStringLiteral("Spindle について"), this, &MainWindow::showAboutDialog);
 
     QToolBar *toolbar = addToolBar(QStringLiteral("Main"));
     toolbar->setMovable(false);

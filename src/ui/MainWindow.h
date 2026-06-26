@@ -84,6 +84,7 @@ private slots:
     void importKindleNotebook();
     void exportChapterAozora();
     void exportTranslatedEpub(int mode); // 0 bilingual, 1 translation-only
+    void showAboutDialog();
 
 private:
     void buildUi();

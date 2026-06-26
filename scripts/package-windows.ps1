@@ -21,19 +21,72 @@ $buildDir = Join-Path $root "build"
 $distDir = Join-Path $root "dist"
 if (-not $QtPrefix) { $QtPrefix = $env:CMAKE_PREFIX_PATH }
 
+function Resolve-QtPrefix {
+  param([string]$Requested)
+
+  if ($Requested) { return $Requested }
+  if (-not (Test-Path -LiteralPath "C:\Qt" -PathType Container)) { return "" }
+
+  $versions = Get-ChildItem -LiteralPath "C:\Qt" -Directory -ErrorAction SilentlyContinue |
+    Sort-Object -Property Name -Descending
+  foreach ($versionDir in $versions) {
+    foreach ($kit in @("msvc2022_64", "msvc2019_64", "msvc_64", "mingw_64")) {
+      $candidate = Join-Path $versionDir.FullName $kit
+      $qtConfig = Join-Path $candidate "lib\cmake\Qt6\Qt6Config.cmake"
+      $windeployqt = Join-Path $candidate "bin\windeployqt.exe"
+      if ((Test-Path -LiteralPath $qtConfig -PathType Leaf) -and
+          (Test-Path -LiteralPath $windeployqt -PathType Leaf)) {
+        return $candidate
+      }
+    }
+  }
+
+  return ""
+}
+
+function Resolve-WindeployQt {
+  param([string]$QtPrefix)
+
+  if ($QtPrefix) {
+    $candidate = Join-Path $QtPrefix "bin\windeployqt.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+
+  $cmd = Get-Command windeployqt -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+
+  return ""
+}
+
+function Invoke-Native {
+  param(
+    [string]$FilePath,
+    [string[]]$Arguments
+  )
+
+  & $FilePath @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "$FilePath exited with code $LASTEXITCODE"
+  }
+}
+
+$QtPrefix = Resolve-QtPrefix $QtPrefix
+
 # Version from CMakeLists.txt
 $version = (Select-String -Path (Join-Path $root "CMakeLists.txt") `
   -Pattern 'project\(Spindle VERSION ([0-9.]+)').Matches[0].Groups[1].Value
 if (-not $version) { $version = "0.0.0" }
 
 # Build
-& (Join-Path $PSScriptRoot "build.ps1") -QtPrefix $QtPrefix -BuildType $BuildType -BuildDir $buildDir
+& (Join-Path $PSScriptRoot "build.ps1") -QtPrefix $QtPrefix -BuildType $BuildType -BuildDir $buildDir -NoDeploy
 
 # Locate exe (single- or multi-config layout) and windeployqt.
 $exe = Get-ChildItem -Path $buildDir -Recurse -Filter "spindle.exe" | Select-Object -First 1
 if (-not $exe) { throw "spindle.exe not found under $buildDir" }
-$windeployqt = if ($QtPrefix) { Join-Path $QtPrefix "bin\windeployqt.exe" } else { "windeployqt.exe" }
-if (-not (Get-Command $windeployqt -ErrorAction SilentlyContinue) -and -not (Test-Path $windeployqt)) {
+$windeployqt = Resolve-WindeployQt $QtPrefix
+if (-not $windeployqt) {
   throw "windeployqt not found (set -QtPrefix)"
 }
 
@@ -44,7 +97,7 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Copy-Item $exe.FullName (Join-Path $stage "spindle.exe")
 
 Write-Host "==> Deploying Qt runtime with windeployqt"
-& $windeployqt --release --compiler-runtime --no-translations (Join-Path $stage "spindle.exe")
+Invoke-Native $windeployqt @("--release", "--compiler-runtime", "--no-translations", "--exclude-plugins", "qtposition_nmea", (Join-Path $stage "spindle.exe"))
 
 # Portable ZIP
 $zip = Join-Path $distDir "Spindle-$version-windows-x64.zip"

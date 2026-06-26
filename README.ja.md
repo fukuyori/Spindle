@@ -193,11 +193,11 @@ pwsh scripts/package-windows.ps1 -QtPrefix ...   # → 携帯版 .zip（NSIS が
 - **macOS** → `.dmg`
 - **Windows** → 携帯版 `.zip` + NSIS `setup.exe`
 
-各実行で成果物がアップロードされます。`v0.2.8` のようなタグを push すると、
+各実行で成果物がアップロードされます。`v0.3.0` のようなタグを push すると、
 全パッケージを添付した GitHub Release も自動作成されます。
 
 ```sh
-git tag v0.2.8 && git push origin v0.2.8
+git tag v0.3.0 && git push origin v0.3.0
 ```
 
 ## プロジェクト構成

@@ -4,6 +4,20 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-06-26
+
+### Added
+- **About dialog** — the Help menu now shows the current Spindle version.
+
+### Fixed
+- **Windows local builds run from a normal PowerShell prompt** — `build.ps1`
+  now detects Visual Studio's bundled CMake, loads the MSVC developer
+  environment, finds the local Qt kit, and refreshes stale CMake generator
+  caches when needed.
+- **Windows build output starts directly** — `build.ps1` now runs
+  `windeployqt` after compiling so `build\spindle.exe` has the Qt WebEngine
+  runtime beside it.
+
 ## [0.2.8] - 2026-06-16
 
 ### Added
@@ -203,6 +217,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
 - Cross-platform build & packaging scripts (macOS `.dmg`, Linux AppImage /
   `.deb`, Windows `.zip` / NSIS installer) and a GitHub Actions release workflow.
 
+[0.3.0]: https://github.com/fukuyori/Spindle/compare/v0.2.8...v0.3.0
 [0.2.8]: https://github.com/fukuyori/Spindle/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/fukuyori/Spindle/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/fukuyori/Spindle/compare/v0.2.5...v0.2.6
