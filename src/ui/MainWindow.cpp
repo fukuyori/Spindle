@@ -1633,7 +1633,8 @@ void MainWindow::summarizeSelection(const QString &text)
     showSummaryDialog(QStringLiteral("選択範囲の要約 (%1)").arg(summaryDetailLabel()),
                       QStringLiteral("要約中…"));
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
-                               targetLanguagePrompt(m_trTarget), src, summaryDetailInstruction());
+                               targetLanguagePrompt(m_trTarget), src, summaryDetailInstruction(),
+                               m_trGlossary.promptBlock());
 }
 
 void MainWindow::summarizeCurrentChapter()
@@ -1700,7 +1701,8 @@ void MainWindow::generateCurrentChapterSummary(bool force)
                           ? QStringLiteral("要約中…（章が長いため先頭部分を要約します）")
                           : QStringLiteral("要約中…"));
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
-                               targetLanguagePrompt(m_trTarget), text, summaryDetailInstruction());
+                               targetLanguagePrompt(m_trTarget), text, summaryDetailInstruction(),
+                               m_trGlossary.promptBlock());
 }
 
 void MainWindow::openSavedCurrentChapterSummary()
@@ -1822,7 +1824,7 @@ void MainWindow::translateCurrentSummary()
     showSummaryDialog(QStringLiteral("要約を翻訳中 (%1)").arg(targetLanguageName(m_trTarget)),
                       QStringLiteral("翻訳中…"));
     m_summaryOllama->translate(m_trEndpoint, effectiveSummaryModel(),
-                               targetLanguagePrompt(m_trTarget), src, QString(),
+                               targetLanguagePrompt(m_trTarget), src, m_trGlossary.promptBlock(),
                                kSummaryTranslateRequestId);
 }
 

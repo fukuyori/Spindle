@@ -4,6 +4,13 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-06-26
+
+### Changed
+- **Summary generation** now applies `<book>.glossary.json` when its
+  `target_lang` matches the current summary target, matching translation
+  behavior.
+
 ## [0.3.2] - 2026-06-26
 
 ### Added
@@ -263,6 +270,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
 - Cross-platform build & packaging scripts (macOS `.dmg`, Linux AppImage /
   `.deb`, Windows `.zip` / NSIS installer) and a GitHub Actions release workflow.
 
+[0.3.3]: https://github.com/fukuyori/Spindle/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/fukuyori/Spindle/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/fukuyori/Spindle/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/fukuyori/Spindle/compare/v0.2.8...v0.3.0

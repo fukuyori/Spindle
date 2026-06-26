@@ -47,9 +47,11 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   text in the translation target language. Chapter summaries can be reopened
   from a sidecar file, regenerated on demand, rendered as Markdown, and saved at
   brief / standard / detailed levels with a summary model separate from the
-  translation model.
+  translation model. The book glossary is also applied to summaries when it
+  matches the current target language.
 - **Translation glossary** — an optional `<book>.glossary.json` fixes the
-  target wording of chosen terms (names, jargon) for consistent translations.
+  target wording of chosen terms (names, jargon) for consistent translations
+  and summaries.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
   from the cache (missing paragraphs are translated on export); the output's
   language metadata is set to the target language.
@@ -142,7 +144,7 @@ source→target language pair and fixes how chosen terms are translated:
 
 Notes:
 - The glossary is used only when `target_lang` matches the current translation
-  target (a missing `target_lang` applies to any target).
+  / summary target (a missing `target_lang` applies to any target).
 - Entries with an empty `src` or `dst` are ignored.
 - Enforcement is via the prompt (the model is told to use these translations), so
   it is a strong preference, not a hard substitution — wording may still adapt to
@@ -215,11 +217,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.3.2` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.3.3` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.3.2 && git push origin v0.3.2
+git tag v0.3.3 && git push origin v0.3.3
 ```
 
 ## Project layout

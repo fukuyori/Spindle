@@ -74,7 +74,8 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
 
 void OllamaClient::summarize(const QString &endpoint, const QString &model,
                              const QString &targetLang, const QString &text,
-                             const QString &detailInstruction, int requestId)
+                             const QString &detailInstruction, const QString &glossary,
+                             int requestId)
 {
     QString base = endpoint.trimmed();
     while (base.endsWith(QLatin1Char('/')))
@@ -95,6 +96,8 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
             .arg(target);
     if (!detailInstruction.trimmed().isEmpty())
         system += QStringLiteral(" ") + detailInstruction.trimmed();
+    if (!glossary.isEmpty())
+        system += glossary;
 
     QJsonObject body;
     body[QStringLiteral("model")] = model;
