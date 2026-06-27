@@ -91,11 +91,14 @@ private slots:
     void exportChapterAozora();
     void exportTranslatedEpub(int mode); // 0 bilingual, 1 translation-only
     void showAboutDialog();
+    void openAppearanceDialog();
 
 private:
     void buildUi();
     void applyFontChoice(); // read the font picker, persist, and re-inject CSS
     QString translationColor() const; // resolve m_trColor for the current theme ("" = none)
+    QColor originalTextColor() const;
+    QColor translationTextColor() const;
     static bool mimeHasEpub(const class QMimeData *mime);
     void openEpubsFromMime(const class QMimeData *mime);
     QStringList recentEpubs() const;
@@ -105,6 +108,9 @@ private:
     void updateRecentEpubsView();
     void showRecentEpubsPane();
     void openRecentEpub(const QString &filePath);
+    int recentChapterIndex(const QString &filePath) const;
+    QString recentChapterLabel(const QString &filePath) const;
+    void saveRecentChapter(const QString &filePath, int index, const QString &label);
     void populateToc();
     void addTocItems(const QVector<TocItem> &items, QTreeWidgetItem *parent);
     void displayChapter(int index, const QString &fragment = QString());
@@ -160,6 +166,11 @@ private:
     enum class Theme { Light, Sepia, Dark };
     enum class TranslateView { Original, Bilingual, Translation };
     enum class SummaryDetail { Brief, Standard, Detailed };
+    struct BrightnessAdjust {
+        int background = 0;
+        int original = 0;
+        int translation = 0;
+    };
 
     std::unique_ptr<EpubBook> m_book;
     QString m_bookId;
@@ -167,6 +178,7 @@ private:
     int m_currentChapter = -1;
     int m_fontSize = 100; // percent (zoom)
     Theme m_theme = Theme::Light;
+    BrightnessAdjust m_brightness[3];
     bool m_xmlView = false; // show raw chapter source instead of rendered view
     QString m_fontFamily;   // body font override ("" = use the book's own fonts)
 

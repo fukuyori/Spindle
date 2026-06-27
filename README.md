@@ -22,8 +22,10 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   override the book's own fonts, light / sepia / dark themes, and a collapsible
   table-of-contents sidebar. The theme, window size, and translation view are
   restored on the next launch. The 8 most recently opened EPUBs can be shown in
-  the left pane for quick reopening; after a history item is opened, the pane
-  stays visible and switches back to the table of contents.
+  the left pane for quick reopening. History entries remember the last-opened
+  chapter, and after one is opened the pane stays visible and switches back to
+  the table of contents. Each theme stores separate brightness sliders for the
+  page background, original text, and translated text.
 - **Full-text search** across the whole book with chapter-grouped snippets and
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
@@ -80,6 +82,9 @@ in a new window, so you can read several at once.
 - **Sidebar:** toggle the left pane with **サイドバー**. Use **履歴** to show the
   recent EPUB list in that pane; opening a history item keeps the pane visible
   and switches it back to the table of contents.
+- **Brightness:** choose **表示 → 明るさ調整…** to adjust the current theme, or
+  select another theme in the dialog. Background, original text, and translated
+  text are saved separately for each theme.
 - **Highlight:** select text → pick a colour from the popup (which also offers
   Copy, Translate, Summarize, and Search the web). Click an existing highlight
   to copy it, search it on the web, change its colour, edit its note, or delete it.
@@ -225,11 +230,11 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 - **macOS** → `.dmg`
 - **Windows** → portable `.zip` + NSIS / Inno Setup `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.3.4` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.3.5` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.3.4 && git push origin v0.3.4
+git tag v0.3.5 && git push origin v0.3.5
 ```
 
 ## Project layout

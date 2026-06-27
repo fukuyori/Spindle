@@ -4,6 +4,14 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.5] - 2026-06-27
+
+### Changed
+- **Theme brightness controls** now let each theme store separate brightness
+  adjustments for the page background, original text, and translated text.
+- **Recent EPUB history** now remembers the last-opened chapter for each book
+  and resumes there next time.
+
 ## [0.3.4] - 2026-06-27
 
 ### Changed
@@ -288,6 +296,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.3.5]: https://github.com/fukuyori/Spindle/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/fukuyori/Spindle/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/fukuyori/Spindle/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/fukuyori/Spindle/compare/v0.3.1...v0.3.2

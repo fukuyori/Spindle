@@ -17,6 +17,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QCursor>
 #include <QDateTime>
 #include <QFile>
@@ -70,6 +71,7 @@
 #include <QStatusBar>
 #include <QStyledItemDelegate>
 #include <QStringList>
+#include <QSlider>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -170,6 +172,67 @@ const Lang kLangs[] = {{"ja", "Japanese", "日本語"}, {"en", "English", "Engli
                        {"fr", "French", "Français"},  {"de", "German", "Deutsch"},
                        {"es", "Spanish", "Español"}};
 constexpr int kSummaryTranslateRequestId = -1001;
+
+QString themeKeyForIndex(int theme)
+{
+    switch (theme) {
+    case 0: return QStringLiteral("light");
+    case 1: return QStringLiteral("sepia");
+    case 2: return QStringLiteral("dark");
+    }
+    return QStringLiteral("light");
+}
+
+QString themeLabelForIndex(int theme)
+{
+    switch (theme) {
+    case 0: return QStringLiteral("ライト");
+    case 1: return QStringLiteral("セピア");
+    case 2: return QStringLiteral("ダーク");
+    }
+    return QStringLiteral("ライト");
+}
+
+QColor adjustedBrightness(QColor color, int amount)
+{
+    float h = 0;
+    float s = 0;
+    float l = 0;
+    float a = 1;
+    color.getHslF(&h, &s, &l, &a);
+    l = qBound(0.0f, l + amount / 100.0f, 1.0f);
+    QColor out;
+    out.setHslF(h, s, l, a);
+    return out;
+}
+
+QColor baseThemeBackgroundForIndex(int theme)
+{
+    switch (theme) {
+    case 0: return QColor("#ffffff");
+    case 1: return QColor("#f4ecd8");
+    case 2: return QColor("#1c1c1e");
+    }
+    return QColor("#ffffff");
+}
+
+QColor baseOriginalTextForIndex(int theme)
+{
+    switch (theme) {
+    case 0: return QColor("#202124");
+    case 1: return QColor("#4b3a26");
+    case 2: return QColor("#d8d8da");
+    }
+    return QColor("#202124");
+}
+
+QString recentFileKey(const QString &filePath)
+{
+    const QString normalized = QFileInfo(filePath).absoluteFilePath().toCaseFolded();
+    return QString::fromLatin1(QCryptographicHash::hash(normalized.toUtf8(),
+                                                        QCryptographicHash::Sha1)
+                                   .toHex());
+}
 
 QString targetLanguageName(const QString &code)
 {
@@ -376,6 +439,101 @@ void MainWindow::showAboutDialog()
                            .arg(QCoreApplication::applicationVersion()));
 }
 
+void MainWindow::openAppearanceDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("表示の明るさ"));
+    QFormLayout *form = new QFormLayout(&dialog);
+
+    QComboBox *themeBox = new QComboBox(&dialog);
+    for (int i = 0; i < 3; ++i)
+        themeBox->addItem(themeLabelForIndex(i), i);
+    themeBox->setCurrentIndex(static_cast<int>(m_theme));
+    form->addRow(QStringLiteral("テーマ"), themeBox);
+
+    auto makeSlider = [&dialog](QSlider **sliderOut, QLabel **labelOut) {
+        QWidget *row = new QWidget(&dialog);
+        QHBoxLayout *layout = new QHBoxLayout(row);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(8);
+        QSlider *slider = new QSlider(Qt::Horizontal, row);
+        slider->setRange(-50, 50);
+        slider->setTickPosition(QSlider::TicksBelow);
+        slider->setTickInterval(25);
+        QLabel *label = new QLabel(QStringLiteral("0"), row);
+        label->setMinimumWidth(34);
+        label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        layout->addWidget(slider, 1);
+        layout->addWidget(label);
+        *sliderOut = slider;
+        *labelOut = label;
+        return row;
+    };
+
+    QSlider *backgroundSlider = nullptr;
+    QSlider *originalSlider = nullptr;
+    QSlider *translationSlider = nullptr;
+    QLabel *backgroundLabel = nullptr;
+    QLabel *originalLabel = nullptr;
+    QLabel *translationLabel = nullptr;
+    form->addRow(QStringLiteral("背景"), makeSlider(&backgroundSlider, &backgroundLabel));
+    form->addRow(QStringLiteral("原文"), makeSlider(&originalSlider, &originalLabel));
+    form->addRow(QStringLiteral("翻訳文"), makeSlider(&translationSlider, &translationLabel));
+
+    auto updateLabels = [=] {
+        backgroundLabel->setText(QString::number(backgroundSlider->value()));
+        originalLabel->setText(QString::number(originalSlider->value()));
+        translationLabel->setText(QString::number(translationSlider->value()));
+    };
+
+    auto loadSliders = [=](int theme) {
+        QSignalBlocker b1(backgroundSlider);
+        QSignalBlocker b2(originalSlider);
+        QSignalBlocker b3(translationSlider);
+        backgroundSlider->setValue(m_brightness[theme].background);
+        originalSlider->setValue(m_brightness[theme].original);
+        translationSlider->setValue(m_brightness[theme].translation);
+        updateLabels();
+    };
+
+    auto saveSliders = [=] {
+        const int theme = themeBox->currentData().toInt();
+        m_brightness[theme].background = backgroundSlider->value();
+        m_brightness[theme].original = originalSlider->value();
+        m_brightness[theme].translation = translationSlider->value();
+
+        QSettings settings;
+        const QString prefix = QStringLiteral("appearance/%1/").arg(themeKeyForIndex(theme));
+        settings.setValue(prefix + QStringLiteral("backgroundBrightness"),
+                          m_brightness[theme].background);
+        settings.setValue(prefix + QStringLiteral("originalBrightness"),
+                          m_brightness[theme].original);
+        settings.setValue(prefix + QStringLiteral("translationBrightness"),
+                          m_brightness[theme].translation);
+
+        if (theme == static_cast<int>(m_theme)) {
+            if (m_view)
+                m_view->page()->setBackgroundColor(themeBackground());
+            injectViewStyle();
+        }
+    };
+
+    connect(themeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [=](int) { loadSliders(themeBox->currentData().toInt()); });
+    for (QSlider *slider : {backgroundSlider, originalSlider, translationSlider}) {
+        connect(slider, &QSlider::valueChanged, this, [=](int) {
+            updateLabels();
+            saveSliders();
+        });
+    }
+    loadSliders(static_cast<int>(m_theme));
+
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    dialog.exec();
+}
+
 void MainWindow::buildUi()
 {
     menuBar()->setNativeMenuBar(true);
@@ -405,6 +563,9 @@ void MainWindow::buildUi()
     QMenu *chapterMenu = menuBar()->addMenu(QStringLiteral("章"));
     chapterMenu->addAction(QStringLiteral("青空文庫 XHTML で書き出し…"), this,
                            &MainWindow::exportChapterAozora);
+
+    QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("表示"));
+    viewMenu->addAction(QStringLiteral("明るさ調整…"), this, &MainWindow::openAppearanceDialog);
 
     QMenu *trMenu = menuBar()->addMenu(QStringLiteral("翻訳"));
     trMenu->addAction(QStringLiteral("設定…"), this, &MainWindow::openTranslateDialog);
@@ -649,6 +810,18 @@ void MainWindow::setupWebChannel()
     // Restore the theme and translation view used last time.
     m_theme = static_cast<Theme>(
         qBound(0, settings.value(QStringLiteral("view/theme"), 0).toInt(), 2));
+    for (int i = 0; i < 3; ++i) {
+        const QString prefix = QStringLiteral("appearance/%1/").arg(themeKeyForIndex(i));
+        m_brightness[i].background =
+            qBound(-50, settings.value(prefix + QStringLiteral("backgroundBrightness"), 0).toInt(),
+                   50);
+        m_brightness[i].original =
+            qBound(-50, settings.value(prefix + QStringLiteral("originalBrightness"), 0).toInt(),
+                   50);
+        m_brightness[i].translation =
+            qBound(-50, settings.value(prefix + QStringLiteral("translationBrightness"), 0).toInt(),
+                   50);
+    }
     m_translateView = static_cast<TranslateView>(
         qBound(0, settings.value(QStringLiteral("translate/view"), 0).toInt(), 2));
 
@@ -739,6 +912,7 @@ void MainWindow::removeRecentEpub(const QString &filePath)
             next.append(existing);
     }
     QSettings().setValue(QStringLiteral("recent/epubs"), next);
+    QSettings().remove(QStringLiteral("recent/chapters/%1").arg(recentFileKey(filePath)));
     updateRecentEpubsMenu();
     updateRecentEpubsView();
 }
@@ -783,7 +957,10 @@ void MainWindow::updateRecentEpubsView()
         const QFileInfo info(path);
         const QString name = info.fileName().isEmpty() ? path : info.fileName();
         const QString folder = info.absolutePath();
-        auto *item = new QListWidgetItem(QStringLiteral("%1\n%2").arg(name, folder),
+        const QString chapter = recentChapterLabel(path);
+        const QString detail =
+            chapter.isEmpty() ? folder : QStringLiteral("%1\n最後: %2").arg(folder, chapter);
+        auto *item = new QListWidgetItem(QStringLiteral("%1\n%2").arg(name, detail),
                                          m_recentEpubsList);
         item->setToolTip(path);
         item->setData(Qt::UserRole, path);
@@ -792,6 +969,29 @@ void MainWindow::updateRecentEpubsView()
             item->setForeground(Qt::gray);
         }
     }
+}
+
+int MainWindow::recentChapterIndex(const QString &filePath) const
+{
+    const QString key = recentFileKey(filePath);
+    return QSettings().value(QStringLiteral("recent/chapters/%1/index").arg(key), 0).toInt();
+}
+
+QString MainWindow::recentChapterLabel(const QString &filePath) const
+{
+    const QString key = recentFileKey(filePath);
+    return QSettings().value(QStringLiteral("recent/chapters/%1/label").arg(key)).toString();
+}
+
+void MainWindow::saveRecentChapter(const QString &filePath, int index, const QString &label)
+{
+    if (filePath.isEmpty() || index < 0)
+        return;
+    const QString key = recentFileKey(filePath);
+    QSettings settings;
+    settings.setValue(QStringLiteral("recent/chapters/%1/index").arg(key), index);
+    settings.setValue(QStringLiteral("recent/chapters/%1/label").arg(key), label);
+    updateRecentEpubsView();
 }
 
 void MainWindow::showRecentEpubsPane()
@@ -864,7 +1064,9 @@ bool MainWindow::openEpub(const QString &filePath)
 
     populateToc();
     renderHighlightsList();
-    displayChapter(0);
+    const int savedChapter = qBound(0, recentChapterIndex(filePath),
+                                    qMax(0, m_book->chapters().size() - 1));
+    displayChapter(savedChapter);
     showSidebarTab(0);
     addRecentEpub(filePath);
     return true;
@@ -915,6 +1117,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
 
     m_currentChapter = index;
     const Chapter &chapter = m_book->chapters().at(index);
+    saveRecentChapter(m_epubPath, index, chapter.label);
 
     // Raw XHTML source view: render the chapter markup as escaped monospace text.
     if (m_xmlView) {
@@ -995,32 +1198,22 @@ void MainWindow::applyZoom()
 
 QColor MainWindow::themeBackground() const
 {
-    switch (m_theme) {
-    case Theme::Light: return QColor("#ffffff");
-    case Theme::Sepia: return QColor("#f4ecd8");
-    case Theme::Dark:  return QColor("#1c1c1e");
-    }
-    return QColor("#ffffff");
+    const int idx = static_cast<int>(m_theme);
+    return adjustedBrightness(baseThemeBackgroundForIndex(idx), m_brightness[idx].background);
 }
 
 void MainWindow::injectViewStyle()
 {
     if (!m_view)
         return;
-    QString css;
-    switch (m_theme) {
-    case Theme::Light:
-        css = QStringLiteral("html,body{background:#ffffff !important;}");
-        break;
-    case Theme::Sepia:
-        css = QStringLiteral("html,body{background:#f4ecd8 !important;} "
-                             "body{color:#4b3a26 !important;}");
-        break;
-    case Theme::Dark:
-        css = QStringLiteral("html,body{background:#1c1c1e !important;} "
-                             "body{color:#d8d8da !important;} a{color:#6db3ff !important;}");
-        break;
-    }
+    const QString bg = themeBackground().name();
+    const QString original = originalTextColor().name();
+    const QString translation = translationTextColor().name();
+    QString css = QStringLiteral(
+        "html,body{background:%1 !important;}"
+        "body,body *{color:%2 !important;}"
+        ".spindle-translation,.spindle-translation *{color:%3 !important;}")
+                      .arg(bg, original, translation);
     // Comfortable left/right reading margins (physical, so they apply equally to
     // horizontal and vertical-rl writing modes). box-sizing keeps them inside.
     css += QStringLiteral(" html{box-sizing:border-box;padding-left:6%;padding-right:6%;}");
@@ -1034,17 +1227,26 @@ void MainWindow::injectViewStyle()
         css += QStringLiteral(" body, body *{ font-family:'%1' !important; }").arg(fam);
     }
 
-    // Optional translation-text tint (the original keeps the theme color).
-    const QString tc = translationColor();
-    if (!tc.isEmpty())
-        css += QStringLiteral(" .spindle-translation{ color:%1 !important; }").arg(tc);
-
     const QString js = QStringLiteral(
         "(function(){var s=document.getElementById('__spindle_theme');"
         "if(!s){s=document.createElement('style');s.id='__spindle_theme';"
         "document.documentElement.appendChild(s);}s.textContent=`%1`;})();")
         .arg(css);
     m_view->page()->runJavaScript(js);
+}
+
+QColor MainWindow::originalTextColor() const
+{
+    const int idx = static_cast<int>(m_theme);
+    return adjustedBrightness(baseOriginalTextForIndex(idx), m_brightness[idx].original);
+}
+
+QColor MainWindow::translationTextColor() const
+{
+    const int idx = static_cast<int>(m_theme);
+    const QString tint = translationColor();
+    const QColor base = tint.isEmpty() ? baseOriginalTextForIndex(idx) : QColor(tint);
+    return adjustedBrightness(base, m_brightness[idx].translation);
 }
 
 QString MainWindow::translationColor() const
