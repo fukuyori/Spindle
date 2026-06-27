@@ -32,6 +32,7 @@ public:
 
     // Instruction block to append to the system prompt ("" when empty).
     QString promptBlock() const;
+    QString promptBlockForText(const QString &text) const;
 
 private:
     QVector<Entry> m_entries;

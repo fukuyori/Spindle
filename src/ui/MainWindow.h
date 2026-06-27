@@ -73,7 +73,7 @@ private slots:
     void runSearch();
     void onSearchResultActivated(QListWidgetItem *item);
     void onHighlightActivated(QListWidgetItem *item);
-    void showSidebarTab(int tab); // 0 = toc, 1 = highlights
+    void showSidebarTab(int tab); // 0 = toc, 1 = highlights, 3 = recent EPUBs
     void onLoadFinished(bool ok);
     void onWebSelection(int block, const QString &side, const QString &lang, int offset,
                         int length, const QString &text);
@@ -102,6 +102,9 @@ private:
     void addRecentEpub(const QString &filePath);
     void removeRecentEpub(const QString &filePath);
     void updateRecentEpubsMenu();
+    void updateRecentEpubsView();
+    void showRecentEpubsPane();
+    void openRecentEpub(const QString &filePath);
     void populateToc();
     void addTocItems(const QVector<TocItem> &items, QTreeWidgetItem *parent);
     void displayChapter(int index, const QString &fragment = QString());
@@ -223,12 +226,15 @@ private:
     QTimer *m_trCacheSave = nullptr;
     QTreeWidget *m_toc = nullptr;
     QMenu *m_recentEpubsMenu = nullptr;
+    QListWidget *m_recentEpubsList = nullptr;
     QListWidget *m_highlightsList = nullptr;
     QListWidget *m_searchResults = nullptr;
     QWidget *m_sidebar = nullptr;
     QStackedWidget *m_sidebarStack = nullptr;
+    QAction *m_sidebarAction = nullptr;
     QPushButton *m_tabToc = nullptr;
     QPushButton *m_tabHighlights = nullptr;
+    QPushButton *m_tabRecent = nullptr;
     QLineEdit *m_searchInput = nullptr;
     QFontComboBox *m_fontCombo = nullptr;
     QAction *m_fontOverride = nullptr;

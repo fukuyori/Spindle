@@ -21,8 +21,9 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Reading controls** — chapter navigation, font zoom, a font picker that can
   override the book's own fonts, light / sepia / dark themes, and a collapsible
   table-of-contents sidebar. The theme, window size, and translation view are
-  restored on the next launch. The File menu keeps the 8 most recently opened
-  EPUBs for quick reopening.
+  restored on the next launch. The 8 most recently opened EPUBs can be shown in
+  the left pane for quick reopening; after a history item is opened, the pane
+  stays visible and switches back to the table of contents.
 - **Full-text search** across the whole book with chapter-grouped snippets and
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
@@ -51,7 +52,8 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   matches the current target language.
 - **Translation glossary** — an optional `<book>.glossary.json` fixes the
   target wording of chosen terms (names, jargon) for consistent translations
-  and summaries.
+  and summaries. Only entries that appear in the current text are sent to the
+  model.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
   from the cache (missing paragraphs are translated on export); the output's
   language metadata is set to the target language.
@@ -75,7 +77,9 @@ in a new window, so you can read several at once.
 | Previous chapter | `←` |
 | Focus search | `Cmd` / `Ctrl` + `F` |
 
-- **Sidebar:** toggle the table-of-contents sidebar with the **目次** button.
+- **Sidebar:** toggle the left pane with **サイドバー**. Use **履歴** to show the
+  recent EPUB list in that pane; opening a history item keeps the pane visible
+  and switches it back to the table of contents.
 - **Highlight:** select text → pick a colour from the popup (which also offers
   Copy, Translate, Summarize, and Search the web). Click an existing highlight
   to copy it, search it on the web, change its colour, edit its note, or delete it.
@@ -100,7 +104,9 @@ in a new window, so you can read several at once.
   summary model is configured from **要約 → 設定…**.
 - **Export a translated book:** **翻訳 → 対訳 EPUB を書き出し / 訳文 EPUB を書き出し**
   builds a new `.epub` from the cached translations (any not-yet-translated
-  paragraphs are translated first, with a cancelable progress dialog).
+  paragraphs are translated first, with a cancelable progress dialog). If Ollama
+  stops without producing text, Spindle saves the exact source paragraph and
+  request conditions to a diagnostic file next to the EPUB.
 - **Source view:** the **XML** button shows the chapter's raw XHTML.
 
 ### Sidecar files
@@ -145,6 +151,8 @@ source→target language pair and fixes how chosen terms are translated:
 Notes:
 - The glossary is used only when `target_lang` matches the current translation
   / summary target (a missing `target_lang` applies to any target).
+- Only entries whose `src` appears in the current paragraph, selection, chapter,
+  or summary text are included in the Ollama prompt.
 - Entries with an empty `src` or `dst` are ignored.
 - Enforcement is via the prompt (the model is told to use these translations), so
   it is a strong preference, not a hard substitution — wording may still adapt to
@@ -215,13 +223,13 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 
 - **Linux** → AppImage + `.deb` / `.tar.gz`
 - **macOS** → `.dmg`
-- **Windows** → portable `.zip` + NSIS `setup.exe`
+- **Windows** → portable `.zip` + NSIS / Inno Setup `setup.exe`
 
-Artifacts are uploaded for every run. Push a tag like `v0.3.3` to also publish a
+Artifacts are uploaded for every run. Push a tag like `v0.3.4` to also publish a
 GitHub Release with all packages attached.
 
 ```sh
-git tag v0.3.3 && git push origin v0.3.3
+git tag v0.3.4 && git push origin v0.3.4
 ```
 
 ## Project layout

@@ -3,10 +3,82 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QStringList>
 #include <QUrl>
+
+namespace {
+
+QString shortResponseForMessage(const QByteArray &bytes)
+{
+    QString text = QString::fromUtf8(bytes).trimmed();
+    text.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    text.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    static constexpr qsizetype kMax = 400;
+    if (text.size() > kMax)
+        text = text.left(kMax) + QStringLiteral("...");
+    return text;
+}
+
+QString extractOllamaContent(const QByteArray &bytes, const QString &emptyMessage, bool *ok)
+{
+    *ok = false;
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(bytes, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        return QStringLiteral("Ollama の応答を JSON として解析できませんでした: %1")
+            .arg(parseError.errorString());
+    }
+
+    const QJsonObject root = doc.object();
+    const QString apiError = root.value(QStringLiteral("error")).toString().trimmed();
+    if (!apiError.isEmpty())
+        return apiError;
+
+    const QJsonObject message = root.value(QStringLiteral("message")).toObject();
+    const QString content = message.value(QStringLiteral("content")).toString().trimmed();
+    if (!content.isEmpty()) {
+        *ok = true;
+        return content;
+    }
+
+    const QString thinking = message.value(QStringLiteral("thinking")).toString().trimmed();
+    if (!thinking.isEmpty()) {
+        return emptyMessage
+            + QStringLiteral("（thinking のみで本文がありません。モデル設定を確認してください）");
+    }
+
+    const QString response = root.value(QStringLiteral("response")).toString().trimmed();
+    if (!response.isEmpty()) {
+        *ok = true;
+        return response;
+    }
+
+    QStringList details;
+    const QString doneReason = root.value(QStringLiteral("done_reason")).toString().trimmed();
+    if (!doneReason.isEmpty())
+        details.append(QStringLiteral("done_reason=%1").arg(doneReason));
+    if (root.contains(QStringLiteral("prompt_eval_count")))
+        details.append(QStringLiteral("prompt_eval_count=%1")
+                           .arg(root.value(QStringLiteral("prompt_eval_count")).toInt()));
+    if (root.contains(QStringLiteral("eval_count"))) {
+        details.append(QStringLiteral("eval_count=%1")
+                           .arg(root.value(QStringLiteral("eval_count")).toInt()));
+    } else if (root.value(QStringLiteral("done")).toBool(false)) {
+        details.append(QStringLiteral("eval_countなし"));
+    }
+
+    const QString suffix =
+        details.isEmpty() ? QString() : QStringLiteral("（%1）").arg(details.join(QStringLiteral(", ")));
+    const QString raw = shortResponseForMessage(bytes);
+    return raw.isEmpty() ? emptyMessage + suffix
+                         : emptyMessage + suffix + QStringLiteral("\n応答: %1").arg(raw);
+}
+
+} // namespace
 
 OllamaClient::OllamaClient(QObject *parent)
     : QObject(parent), m_nam(new QNetworkAccessManager(this))
@@ -35,6 +107,7 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
     QJsonObject body;
     body[QStringLiteral("model")] = model;
     body[QStringLiteral("stream")] = false;
+    body[QStringLiteral("think")] = false;
     QJsonObject options;
     options[QStringLiteral("temperature")] = 0.2;
     body[QStringLiteral("options")] = options;
@@ -49,26 +122,24 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, url, requestId]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, url, requestId]() {
         reply->deleteLater();
+        const QByteArray bytes = reply->readAll();
         if (reply->error() != QNetworkReply::NoError) {
             emit finished(requestId, false,
                           QStringLiteral("Ollama への接続に失敗しました (%1): %2")
                               .arg(url.toString(), reply->errorString()));
             return;
         }
-        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-        const QString content = doc.object()
-                                    .value(QStringLiteral("message"))
-                                    .toObject()
-                                    .value(QStringLiteral("content"))
-                                    .toString()
-                                    .trimmed();
-        if (content.isEmpty()) {
-            emit finished(requestId, false, QStringLiteral("Ollama が空の翻訳を返しました"));
+        bool ok = false;
+        const QString result =
+            extractOllamaContent(bytes, QStringLiteral("Ollama が空の翻訳を返しました"), &ok);
+        if (!ok) {
+            emit finished(requestId, false, result);
             return;
         }
-        emit finished(requestId, true, content);
+        emit finished(requestId, true, result);
     });
 }
 
@@ -102,6 +173,7 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
     QJsonObject body;
     body[QStringLiteral("model")] = model;
     body[QStringLiteral("stream")] = false;
+    body[QStringLiteral("think")] = false;
     QJsonObject options;
     options[QStringLiteral("temperature")] = 0.2;
     body[QStringLiteral("options")] = options;
@@ -120,23 +192,20 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply, url, requestId]() {
         reply->deleteLater();
+        const QByteArray bytes = reply->readAll();
         if (reply->error() != QNetworkReply::NoError) {
             emit finished(requestId, false,
                           QStringLiteral("Ollama への接続に失敗しました (%1): %2")
                               .arg(url.toString(), reply->errorString()));
             return;
         }
-        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-        const QString content = doc.object()
-                                    .value(QStringLiteral("message"))
-                                    .toObject()
-                                    .value(QStringLiteral("content"))
-                                    .toString()
-                                    .trimmed();
-        if (content.isEmpty()) {
-            emit finished(requestId, false, QStringLiteral("Ollama が空の要約を返しました"));
+        bool ok = false;
+        const QString result =
+            extractOllamaContent(bytes, QStringLiteral("Ollama が空の要約を返しました"), &ok);
+        if (!ok) {
+            emit finished(requestId, false, result);
             return;
         }
-        emit finished(requestId, true, content);
+        emit finished(requestId, true, result);
     });
 }

@@ -4,7 +4,24 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
-## [0.3.3] - 2026-06-26
+## [0.3.4] - 2026-06-27
+
+### Changed
+- **Recent EPUB history** can now be shown in the left pane, switches back to
+  the table of contents after a history item is opened, and can be reopened from
+  the toolbar or File menu.
+- **Glossary prompting** now sends only entries that appear in the current text,
+  preventing short labels such as `Notes` from being overwhelmed by unrelated
+  glossary terms.
+
+### Fixed
+- **Translated EPUB export** now disables Ollama thinking output for translation
+  requests, reports no-token Ollama stops with response metadata, saves the full
+  failing paragraph and request conditions to a diagnostic file, and does not
+  send export translation requests when the book language already matches the
+  target language.
+
+## [0.3.3] - 2026-06-27
 
 ### Changed
 - **Summary generation** now applies `<book>.glossary.json` when its
@@ -268,8 +285,10 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
 - Local AI translation via Ollama (original / bilingual / translation-only).
 - Light / sepia / dark themes and font zoom.
 - Cross-platform build & packaging scripts (macOS `.dmg`, Linux AppImage /
-  `.deb`, Windows `.zip` / NSIS installer) and a GitHub Actions release workflow.
+  `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
+  release workflow.
 
+[0.3.4]: https://github.com/fukuyori/Spindle/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/fukuyori/Spindle/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/fukuyori/Spindle/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/fukuyori/Spindle/compare/v0.3.0...v0.3.1

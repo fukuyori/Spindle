@@ -4,6 +4,47 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
+
+namespace {
+
+QString promptBlockFromEntries(const QVector<Glossary::Entry> &entries)
+{
+    if (entries.isEmpty())
+        return {};
+    QString block = QStringLiteral(
+        "\n\nGlossary — always translate these terms with the exact given target, "
+        "keeping usage consistent (adjust only for grammatical inflection):");
+    for (const Glossary::Entry &e : entries) {
+        block += QStringLiteral("\n- %1 => %2").arg(e.source, e.target);
+        if (!e.note.isEmpty())
+            block += QStringLiteral(" (%1)").arg(e.note);
+    }
+    return block;
+}
+
+bool isWordish(QChar c)
+{
+    return c.isLetterOrNumber() || c == QLatin1Char('_');
+}
+
+bool sourceAppearsInText(const QString &source, const QString &text)
+{
+    if (source.isEmpty() || text.isEmpty())
+        return false;
+
+    QString pattern = QRegularExpression::escape(source);
+    if (isWordish(source.front()))
+        pattern.prepend(QStringLiteral("(?<![\\p{L}\\p{N}_])"));
+    if (isWordish(source.back()))
+        pattern.append(QStringLiteral("(?![\\p{L}\\p{N}_])"));
+
+    QRegularExpression re(pattern, QRegularExpression::CaseInsensitiveOption
+                                       | QRegularExpression::UseUnicodePropertiesOption);
+    return re.match(text).hasMatch();
+}
+
+} // namespace
 
 void Glossary::load(const QString &epubPath, const QString &lang)
 {
@@ -40,15 +81,16 @@ void Glossary::load(const QString &epubPath, const QString &lang)
 
 QString Glossary::promptBlock() const
 {
-    if (m_entries.isEmpty())
-        return {};
-    QString block = QStringLiteral(
-        "\n\nGlossary — always translate these terms with the exact given target, "
-        "keeping usage consistent (adjust only for grammatical inflection):");
+    return promptBlockFromEntries(m_entries);
+}
+
+QString Glossary::promptBlockForText(const QString &text) const
+{
+    QVector<Entry> matched;
+    matched.reserve(m_entries.size());
     for (const Entry &e : m_entries) {
-        block += QStringLiteral("\n- %1 => %2").arg(e.source, e.target);
-        if (!e.note.isEmpty())
-            block += QStringLiteral(" (%1)").arg(e.note);
+        if (sourceAppearsInText(e.source, text))
+            matched.append(e);
     }
-    return block;
+    return promptBlockFromEntries(matched);
 }

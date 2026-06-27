@@ -33,6 +33,7 @@
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QDir>
 #include <QHBoxLayout>
 #include <QHash>
 #include <QIcon>
@@ -59,6 +60,7 @@
 #include <iterator>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QColorDialog>
 #include <QFontComboBox>
 #include <QSettings>
@@ -67,6 +69,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QStyledItemDelegate>
+#include <QStringList>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -188,6 +191,92 @@ QString targetLanguagePrompt(const QString &code)
     return code;
 }
 
+QString compactPreview(const QString &text, qsizetype maxChars = 240)
+{
+    QString s = text;
+    static const QRegularExpression ws(QStringLiteral("\\s+"));
+    s.replace(ws, QStringLiteral(" "));
+    s = s.trimmed();
+    if (s.size() > maxChars)
+        s = s.left(maxChars) + QStringLiteral("...");
+    return s;
+}
+
+QString translationExportFailureMessage(const QString &error, const QString &source,
+                                        int index, int total, const QString &target,
+                                        const QString &targetCode, const QString &model,
+                                        const QString &diagnosticPath = {})
+{
+    QStringList lines;
+    lines << QStringLiteral("翻訳に失敗しました:") << error << QString();
+    lines << QStringLiteral("対象段落: %1/%2").arg(index).arg(total);
+    lines << QStringLiteral("翻訳先: %1 (%2)").arg(target, targetCode);
+    lines << QStringLiteral("モデル: %1").arg(model);
+    lines << QStringLiteral("本文長: %1 文字").arg(source.size());
+    lines << QStringLiteral("本文先頭: %1").arg(compactPreview(source));
+    if (!diagnosticPath.isEmpty())
+        lines << QString() << diagnosticPath;
+    return lines.join(QLatin1Char('\n'));
+}
+
+QString translationDiagnosticPath(const QString &epubPath)
+{
+    const QFileInfo info(epubPath);
+    const QString base = info.completeBaseName().isEmpty() ? QStringLiteral("book")
+                                                           : info.completeBaseName();
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    return info.dir().filePath(
+        QStringLiteral("%1.spindle-translation-failure-%2.txt").arg(base, stamp));
+}
+
+bool writeTranslationDiagnostic(const QString &path, QString *writeError, const QString &epubPath,
+                                const QString &bookTitle, const QString &bookLanguage,
+                                const QString &endpoint, const QString &model,
+                                const QString &targetName, const QString &targetCode,
+                                const QString &targetPrompt, const QString &glossary,
+                                const QString &source, int index, int total,
+                                const QString &ollamaError)
+{
+    QStringList lines;
+    lines << QStringLiteral("Spindle translation export diagnostic");
+    lines << QStringLiteral("Timestamp: %1")
+                 .arg(QDateTime::currentDateTime().toString(Qt::ISODate));
+    lines << QStringLiteral("EPUB: %1").arg(epubPath);
+    lines << QStringLiteral("Book title: %1").arg(bookTitle);
+    lines << QStringLiteral("Book language: %1").arg(bookLanguage);
+    lines << QStringLiteral("Target: %1 (%2)").arg(targetName, targetCode);
+    lines << QStringLiteral("Target prompt: %1").arg(targetPrompt);
+    lines << QStringLiteral("Endpoint: %1").arg(endpoint);
+    lines << QStringLiteral("Model: %1").arg(model);
+    lines << QStringLiteral("Paragraph: %1/%2").arg(index).arg(total);
+    lines << QStringLiteral("Source length: %1 characters").arg(source.size());
+    lines << QString();
+    lines << QStringLiteral("Ollama error:");
+    lines << ollamaError;
+    lines << QString();
+    lines << QStringLiteral("Glossary prompt sent:");
+    lines << (glossary.isEmpty() ? QStringLiteral("(none)") : glossary);
+    lines << QString();
+    lines << QStringLiteral("Source text sent to Ollama:");
+    lines << QStringLiteral("----- BEGIN SOURCE -----");
+    lines << source;
+    lines << QStringLiteral("----- END SOURCE -----");
+
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (writeError)
+            *writeError = f.errorString();
+        return false;
+    }
+    f.write(lines.join(QLatin1Char('\n')).toUtf8());
+    if (!f.commit()) {
+        if (writeError)
+            *writeError = f.errorString();
+        return false;
+    }
+    return true;
+}
+
 QIcon swatchIcon(HighlightColor c)
 {
     QPixmap pm(16, 16);
@@ -296,6 +385,8 @@ void MainWindow::buildUi()
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenTriggered);
     QMenu *fileMenu = menuBar()->addMenu(QStringLiteral("ファイル"));
     fileMenu->addAction(openAction);
+    fileMenu->addAction(QStringLiteral("最近開いた EPUB を表示"), this,
+                        &MainWindow::showRecentEpubsPane);
     m_recentEpubsMenu = fileMenu->addMenu(QStringLiteral("最近開いた EPUB"));
     connect(m_recentEpubsMenu, &QMenu::aboutToShow, this, &MainWindow::updateRecentEpubsMenu);
     updateRecentEpubsMenu();
@@ -365,12 +456,18 @@ void MainWindow::buildUi()
     connect(openToolbarAction, &QAction::triggered, this, &MainWindow::onOpenTriggered);
     toolbar->addSeparator();
 
-    QAction *sidebarAction = toolbar->addAction(QStringLiteral("目次"));
-    sidebarAction->setCheckable(true);
-    sidebarAction->setChecked(true);
-    sidebarAction->setToolTip(QStringLiteral("目次サイドバーの表示/非表示"));
-    connect(sidebarAction, &QAction::toggled, this,
-            [this](bool on) { if (m_sidebar) m_sidebar->setVisible(on); });
+    m_sidebarAction = toolbar->addAction(QStringLiteral("サイドバー"));
+    m_sidebarAction->setCheckable(true);
+    m_sidebarAction->setChecked(true);
+    m_sidebarAction->setToolTip(QStringLiteral("左ペインの表示/非表示"));
+    connect(m_sidebarAction, &QAction::toggled, this,
+            [this](bool on) {
+                if (m_sidebar)
+                    m_sidebar->setVisible(on);
+            });
+    QAction *recentToolbarAction = toolbar->addAction(QStringLiteral("履歴"));
+    recentToolbarAction->setToolTip(QStringLiteral("最近開いた EPUB を左ペインに表示"));
+    connect(recentToolbarAction, &QAction::triggered, this, &MainWindow::showRecentEpubsPane);
     toolbar->addSeparator();
     m_prevAction = toolbar->addAction(QStringLiteral("←"));
     m_prevAction->setToolTip(QStringLiteral("前の章"));
@@ -440,13 +537,17 @@ void MainWindow::buildUi()
     tabsLayout->setSpacing(6);
     m_tabToc = new QPushButton(QStringLiteral("目次"), tabs);
     m_tabHighlights = new QPushButton(QStringLiteral("ハイライト"), tabs);
+    m_tabRecent = new QPushButton(QStringLiteral("履歴"), tabs);
     m_tabToc->setCheckable(true);
     m_tabHighlights->setCheckable(true);
+    m_tabRecent->setCheckable(true);
     m_tabToc->setChecked(true);
     connect(m_tabToc, &QPushButton::clicked, this, [this] { showSidebarTab(0); });
     connect(m_tabHighlights, &QPushButton::clicked, this, [this] { showSidebarTab(1); });
+    connect(m_tabRecent, &QPushButton::clicked, this, [this] { showSidebarTab(3); });
     tabsLayout->addWidget(m_tabToc);
     tabsLayout->addWidget(m_tabHighlights);
+    tabsLayout->addWidget(m_tabRecent);
 
     m_toc = new QTreeWidget(sidebar);
     m_toc->setHeaderHidden(true);
@@ -472,16 +573,31 @@ void MainWindow::buildUi()
     m_searchResults->setWordWrap(true);
     connect(m_searchResults, &QListWidget::itemClicked, this, &MainWindow::onSearchResultActivated);
 
+    m_recentEpubsList = new QListWidget(sidebar);
+    m_recentEpubsList->setWordWrap(true);
+    connect(m_recentEpubsList, &QListWidget::itemClicked, this,
+            [this](QListWidgetItem *item) {
+                if (!item)
+                    return;
+                const QString path = item->data(Qt::UserRole).toString();
+                if (!path.isEmpty())
+                    openRecentEpub(path);
+            });
+
     m_sidebarStack = new QStackedWidget(sidebar);
     m_sidebarStack->addWidget(m_toc);            // 0
     m_sidebarStack->addWidget(m_highlightsList); // 1
     m_sidebarStack->addWidget(m_searchResults);  // 2
+    m_sidebarStack->addWidget(m_recentEpubsList); // 3
 
     sideLayout->addWidget(m_titleLabel);
     sideLayout->addWidget(m_authorLabel);
     sideLayout->addWidget(m_searchInput);
     sideLayout->addWidget(tabs);
     sideLayout->addWidget(m_sidebarStack, 1);
+    updateRecentEpubsView();
+    if (!recentEpubs().isEmpty())
+        showSidebarTab(3);
 
     // --- web viewer ---
     // The epub:// scheme handler is installed once, globally, on the default
@@ -612,6 +728,7 @@ void MainWindow::addRecentEpub(const QString &filePath)
     }
     QSettings().setValue(QStringLiteral("recent/epubs"), next);
     updateRecentEpubsMenu();
+    updateRecentEpubsView();
 }
 
 void MainWindow::removeRecentEpub(const QString &filePath)
@@ -623,6 +740,7 @@ void MainWindow::removeRecentEpub(const QString &filePath)
     }
     QSettings().setValue(QStringLiteral("recent/epubs"), next);
     updateRecentEpubsMenu();
+    updateRecentEpubsView();
 }
 
 void MainWindow::updateRecentEpubsMenu()
@@ -644,15 +762,75 @@ void MainWindow::updateRecentEpubsMenu()
         const QString name = info.fileName().isEmpty() ? path : info.fileName();
         QAction *action = m_recentEpubsMenu->addAction(QStringLiteral("%1. %2").arg(index++).arg(name));
         action->setToolTip(path);
-        connect(action, &QAction::triggered, this, [this, path] {
-            if (!QFileInfo::exists(path)) {
-                QMessageBox::warning(this, QStringLiteral("Spindle"),
-                                     QStringLiteral("履歴の EPUB が見つかりません:\n%1").arg(path));
-                removeRecentEpub(path);
-                return;
-            }
-            openEpubSmart(path);
-        });
+        connect(action, &QAction::triggered, this, [this, path] { openRecentEpub(path); });
+    }
+}
+
+void MainWindow::updateRecentEpubsView()
+{
+    if (!m_recentEpubsList)
+        return;
+
+    m_recentEpubsList->clear();
+    const QStringList paths = recentEpubs();
+    if (paths.isEmpty()) {
+        QListWidgetItem *empty = new QListWidgetItem(QStringLiteral("履歴なし"), m_recentEpubsList);
+        empty->setFlags(empty->flags() & ~Qt::ItemIsEnabled);
+        return;
+    }
+
+    for (const QString &path : paths) {
+        const QFileInfo info(path);
+        const QString name = info.fileName().isEmpty() ? path : info.fileName();
+        const QString folder = info.absolutePath();
+        auto *item = new QListWidgetItem(QStringLiteral("%1\n%2").arg(name, folder),
+                                         m_recentEpubsList);
+        item->setToolTip(path);
+        item->setData(Qt::UserRole, path);
+        if (!info.exists()) {
+            item->setText(QStringLiteral("%1\n%2").arg(name, QStringLiteral("見つかりません")));
+            item->setForeground(Qt::gray);
+        }
+    }
+}
+
+void MainWindow::showRecentEpubsPane()
+{
+    updateRecentEpubsView();
+    if (m_sidebar)
+        m_sidebar->setVisible(true);
+    if (m_sidebarAction) {
+        QSignalBlocker block(m_sidebarAction);
+        m_sidebarAction->setChecked(true);
+    }
+    if (m_searchInput)
+        m_searchInput->clear();
+    showSidebarTab(3);
+}
+
+void MainWindow::openRecentEpub(const QString &filePath)
+{
+    if (!QFileInfo::exists(filePath)) {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("履歴の EPUB が見つかりません:\n%1").arg(filePath));
+        removeRecentEpub(filePath);
+        return;
+    }
+
+    if (m_book) {
+        openInNewWindow(filePath);
+    } else if (!openEpub(filePath)) {
+        return;
+    }
+
+    if (m_searchInput)
+        m_searchInput->clear();
+    showSidebarTab(0);
+    if (m_sidebar)
+        m_sidebar->setVisible(true);
+    if (m_sidebarAction) {
+        QSignalBlocker block(m_sidebarAction);
+        m_sidebarAction->setChecked(true);
     }
 }
 
@@ -1409,10 +1587,11 @@ void MainWindow::exportTranslatedEpub(int mode)
     const auto emode = mode == 1 ? translated_epub::Mode::Translation
                                  : translated_epub::Mode::Bilingual;
     const QString label = mode == 1 ? QStringLiteral("訳文") : QStringLiteral("対訳");
+    const bool translationNeeded = !isBookLanguage(m_trTarget);
 
     // Translate any paragraphs not yet cached, filling the cache.
     const QStringList missing = translated_epub::collectMissing(*m_book, m_trCache);
-    if (!missing.isEmpty()) {
+    if (translationNeeded && !missing.isEmpty()) {
         QProgressDialog progress(
             QStringLiteral("未翻訳の段落を翻訳しています（%1 へ: %2）…")
                 .arg(targetLanguageName(m_trTarget), m_trModel),
@@ -1421,25 +1600,54 @@ void MainWindow::exportTranslatedEpub(int mode)
         progress.setMinimumDuration(0);
 
         OllamaClient client;
+        auto translateForExport = [&](const QString &text, QString *out) {
+            QEventLoop loop;
+            bool ok = false;
+            QString result;
+            auto conn = connect(&client, &OllamaClient::finished, &loop,
+                                [&](int, bool o, const QString &r) {
+                                    ok = o;
+                                    result = r;
+                                    loop.quit();
+                                });
+            client.translate(m_trEndpoint, m_trModel, targetLanguagePrompt(m_trTarget), text,
+                             m_trGlossary.promptBlockForText(text));
+            loop.exec();
+            disconnect(conn);
+
+            *out = result;
+            return ok;
+        };
+
         int done = 0;
         for (const QString &text : missing) {
             if (progress.wasCanceled())
                 return;
             progress.setValue(done);
 
-            QEventLoop loop;
-            bool ok = false;
             QString out;
-            auto conn = connect(&client, &OllamaClient::finished, &loop,
-                                [&](int, bool o, const QString &r) { ok = o; out = r; loop.quit(); });
-            client.translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), text,
-                             m_trGlossary.promptBlock());
-            loop.exec();
-            disconnect(conn);
-
-            if (!ok) {
-                QMessageBox::warning(this, QStringLiteral("Spindle"),
-                                     QStringLiteral("翻訳に失敗しました:\n%1").arg(out));
+            if (!translateForExport(text, &out)) {
+                const QString targetName = targetLanguageName(m_trTarget);
+                const QString targetPrompt = targetLanguagePrompt(m_trTarget);
+                const QString glossary = m_trGlossary.promptBlockForText(text);
+                const QString diagnosticPath = translationDiagnosticPath(m_epubPath);
+                QString diagnosticError;
+                QString diagnosticMessage;
+                if (writeTranslationDiagnostic(
+                        diagnosticPath, &diagnosticError, m_epubPath, m_book->title(),
+                        m_book->language(), m_trEndpoint, m_trModel, targetName, m_trTarget,
+                        targetPrompt, glossary, text, done + 1, missing.size(), out)) {
+                    diagnosticMessage =
+                        QStringLiteral("送信した全文を保存しました:\n%1").arg(diagnosticPath);
+                } else if (!diagnosticError.isEmpty()) {
+                    diagnosticMessage =
+                        QStringLiteral("診断ファイルを保存できませんでした: %1").arg(diagnosticError);
+                }
+                QMessageBox::warning(
+                    this, QStringLiteral("Spindle"),
+                    translationExportFailureMessage(out, text, done + 1, missing.size(),
+                                                    targetName, m_trTarget, m_trModel,
+                                                    diagnosticMessage));
                 m_trCache.flush();
                 return;
             }
@@ -1567,7 +1775,7 @@ void MainWindow::translateNext(int run)
             m_bridge->applyTranslation(item.first, QStringLiteral("翻訳中…"),
                                        QStringLiteral("pending"));
         m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), item.second,
-                            m_trGlossary.promptBlock(), reqId);
+                            m_trGlossary.promptBlockForText(item.second), reqId);
     }
 }
 
@@ -1610,7 +1818,7 @@ void MainWindow::translateSelection(const QString &text)
         return;
     showTranslatePopup(QStringLiteral("翻訳中…"));
     m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), src,
-                                 m_trGlossary.promptBlock());
+                                 m_trGlossary.promptBlockForText(src));
 }
 
 void MainWindow::onSelectionTranslated(int requestId, bool ok, const QString &result)
@@ -1634,7 +1842,7 @@ void MainWindow::summarizeSelection(const QString &text)
                       QStringLiteral("要約中…"));
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), src, summaryDetailInstruction(),
-                               m_trGlossary.promptBlock());
+                               m_trGlossary.promptBlockForText(src));
 }
 
 void MainWindow::summarizeCurrentChapter()
@@ -1702,7 +1910,7 @@ void MainWindow::generateCurrentChapterSummary(bool force)
                           : QStringLiteral("要約中…"));
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), text, summaryDetailInstruction(),
-                               m_trGlossary.promptBlock());
+                               m_trGlossary.promptBlockForText(text));
 }
 
 void MainWindow::openSavedCurrentChapterSummary()
@@ -1824,8 +2032,8 @@ void MainWindow::translateCurrentSummary()
     showSummaryDialog(QStringLiteral("要約を翻訳中 (%1)").arg(targetLanguageName(m_trTarget)),
                       QStringLiteral("翻訳中…"));
     m_summaryOllama->translate(m_trEndpoint, effectiveSummaryModel(),
-                               targetLanguagePrompt(m_trTarget), src, m_trGlossary.promptBlock(),
-                               kSummaryTranslateRequestId);
+                               targetLanguagePrompt(m_trTarget), src,
+                               m_trGlossary.promptBlockForText(src), kSummaryTranslateRequestId);
 }
 
 void MainWindow::onSummaryFinished(int requestId, bool ok, const QString &result)
@@ -2277,6 +2485,7 @@ void MainWindow::showSidebarTab(int tab)
     m_sidebarTab = tab;
     m_tabToc->setChecked(tab == 0);
     m_tabHighlights->setChecked(tab == 1);
+    m_tabRecent->setChecked(tab == 3);
     if (m_searchInput->text().trimmed().isEmpty())
         m_sidebarStack->setCurrentIndex(tab);
 }
