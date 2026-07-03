@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.3.5 LANGUAGES C CXX)
+project(Spindle VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,7 +20,7 @@ if(APPLE AND NOT CMAKE_PREFIX_PATH)
   endforeach()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network Xml WebEngineWidgets WebChannel)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Xml WebEngineWidgets WebChannel Concurrent)
 
 qt_standard_project_setup()
 
@@ -102,6 +102,7 @@ target_link_libraries(spindle PRIVATE
   Qt6::Xml
   Qt6::WebEngineWidgets
   Qt6::WebChannel
+  Qt6::Concurrent
   miniz
 )
 

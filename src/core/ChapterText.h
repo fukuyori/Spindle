@@ -14,6 +14,7 @@ struct ChapterText {
     QString label;
     QString body;                       // textContent of <body> (placeholders removed, nbsp->space)
     QString normalizedBody;             // runs of whitespace collapsed to single spaces
+    QString normalizedLower;            // normalizedBody lowercased (search haystack)
     QVector<int> normalizedToOriginal;  // normalizedBody index -> body index
     QString compactBody;                // all whitespace removed
     QVector<int> compactToOriginal;     // compactBody index -> body index
@@ -34,3 +35,13 @@ ChapterText buildChapterText(const ChapterRef &ref, const QString &body);
 
 QVector<ChapterText> buildChapterTexts(const EpubBook &book,
                                        const QVector<ChapterRef> &chapters);
+
+// Self-contained chapter input (path/label + raw XHTML) so the parse-heavy
+// build can run on a worker thread without touching EpubBook / the zip.
+struct ChapterSource {
+    QString path;
+    QString label;
+    QString xhtml;
+};
+
+QVector<ChapterText> buildChapterTextsFromSources(const QVector<ChapterSource> &sources);

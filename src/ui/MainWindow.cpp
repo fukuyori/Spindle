@@ -16,6 +16,7 @@
 
 #include <QAction>
 #include <QActionGroup>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QCursor>
@@ -54,10 +55,11 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QEventLoop>
 #include <QFormLayout>
-#include <QProgressDialog>
+#include <QFutureWatcher>
+#include <QProgressBar>
 #include <QJsonArray>
+#include <QtConcurrent/QtConcurrent>
 #include <iterator>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -79,6 +81,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QWebChannel>
+#include <QWebEngineNewWindowRequest>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
 #include <QWebEngineScript>
@@ -87,6 +90,37 @@
 #include <QWebEngineView>
 
 namespace {
+
+// Reading-pane page with a navigation policy: only this window's own book may
+// render here. External http(s) links open in the system browser instead of
+// navigating the pane (a remote page would otherwise receive the injected
+// scripts and could probe the web channel); everything else is refused.
+class ReaderPage : public QWebEnginePage {
+public:
+    ReaderPage(const QString &schemeId, QObject *parent)
+        : QWebEnginePage(QWebEngineProfile::defaultProfile(), parent), m_schemeId(schemeId)
+    {
+    }
+
+protected:
+    bool acceptNavigationRequest(const QUrl &url, NavigationType type, bool isMainFrame) override
+    {
+        Q_UNUSED(isMainFrame);
+        // Loads we initiate from C++ (setUrl / setHtml) arrive as "typed".
+        if (type == QWebEnginePage::NavigationTypeTyped)
+            return true;
+        if (url.scheme() == QLatin1String("epub"))
+            return url.host() == m_schemeId; // in-book links only, no cross-book
+        if (url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https")) {
+            QDesktopServices::openUrl(url);
+            return false;
+        }
+        return false; // file:, data:, javascript:, ...
+    }
+
+private:
+    QString m_schemeId;
+};
 
 // Floating translation result popup: a Qt::Popup (so an outside click dismisses
 // it) that also closes on Escape.
@@ -171,7 +205,9 @@ const Lang kLangs[] = {{"ja", "Japanese", "日本語"}, {"en", "English", "Engli
                        {"zh", "Chinese", "中文"},     {"ko", "Korean", "한국어"},
                        {"fr", "French", "Français"},  {"de", "German", "Deutsch"},
                        {"es", "Spanish", "Español"}};
-constexpr int kSummaryTranslateRequestId = -1001;
+
+// Number of Ollama requests kept in flight at once (chapter view & export).
+constexpr int kTranslateConcurrency = 2;
 
 QString themeKeyForIndex(int theme)
 {
@@ -342,6 +378,10 @@ bool writeTranslationDiagnostic(const QString &path, QString *writeError, const 
 
 QIcon swatchIcon(HighlightColor c)
 {
+    static QHash<int, QIcon> cache; // rendered once per color, reused per list item
+    const auto it = cache.constFind(static_cast<int>(c));
+    if (it != cache.constEnd())
+        return *it;
     QPixmap pm(16, 16);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
@@ -349,7 +389,9 @@ QIcon swatchIcon(HighlightColor c)
     p.setBrush(highlightQColor(c));
     p.setPen(QPen(QColor(0, 0, 0, 60)));
     p.drawRoundedRect(1, 1, 14, 14, 3, 3);
-    return QIcon(pm);
+    const QIcon icon(pm);
+    cache.insert(static_cast<int>(c), icon);
+    return icon;
 }
 
 } // namespace
@@ -378,6 +420,21 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_trCacheSave->setInterval(1500);
     connect(m_trCacheSave, &QTimer::timeout, this, [this] { m_trCache.flush(); });
 
+    m_viewUnfreeze = new QTimer(this);
+    m_viewUnfreeze->setSingleShot(true);
+    m_viewUnfreeze->setInterval(1500);
+    connect(m_viewUnfreeze, &QTimer::timeout, this, [this] {
+        if (m_view)
+            m_view->setUpdatesEnabled(true);
+    });
+
+    // Debounce last-read-chapter persistence: rapid chapter flips shouldn't hit
+    // QSettings (the registry on Windows) and re-stat the recent list each time.
+    m_recentSave = new QTimer(this);
+    m_recentSave->setSingleShot(true);
+    m_recentSave->setInterval(800);
+    connect(m_recentSave, &QTimer::timeout, this, &MainWindow::commitRecentChapter);
+
     m_summaryDetail = static_cast<SummaryDetail>(
         qBound(0, QSettings().value(QStringLiteral("summary/detail"), 1).toInt(), 2));
 
@@ -393,6 +450,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
 MainWindow::~MainWindow()
 {
+    commitRecentChapter(); // don't lose the last chapter to the debounce timer
     m_trCache.flush();
     EpubSchemeHandler::instance()->unregisterBook(m_schemeId);
     --g_windowCount;
@@ -407,11 +465,14 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::showEvent(QShowEvent *event)
 {
     QMainWindow::showEvent(event);
-    // Put keyboard focus on the reading view (not the search box), so Space/arrow
-    // navigation works immediately. Deferred so the web view's render widget,
-    // which is created lazily, exists by the time we focus it.
-    if (m_view)
-        QTimer::singleShot(0, m_view, [this] { if (m_view) m_view->setFocus(); });
+    // Deferred: create the web view (Chromium init) only after the window is on
+    // screen, then put keyboard focus on the reading view (not the search box)
+    // so Space/arrow navigation works immediately.
+    QTimer::singleShot(0, this, [this] {
+        ensureWebView();
+        if (m_view)
+            m_view->setFocus();
+    });
 }
 
 MainWindow *MainWindow::openInNewWindow(const QString &filePath)
@@ -419,8 +480,11 @@ MainWindow *MainWindow::openInNewWindow(const QString &filePath)
     auto *w = new MainWindow();
     w->setAttribute(Qt::WA_DeleteOnClose);
     w->show();
+    // Deferred so the window frame appears before the (WebEngine-initializing)
+    // book load runs — noticeably faster perceived startup for double-clicked
+    // EPUBs and command-line launches.
     if (!filePath.isEmpty())
-        w->openEpub(filePath);
+        QTimer::singleShot(0, w, [w, filePath] { w->openEpub(filePath); });
     return w;
 }
 
@@ -496,20 +560,31 @@ void MainWindow::openAppearanceDialog()
         updateLabels();
     };
 
+    // Live preview applies immediately; the QSettings writes (registry on
+    // Windows) are batched so a slider drag doesn't persist every tick.
+    QTimer *persistTimer = new QTimer(&dialog);
+    persistTimer->setSingleShot(true);
+    persistTimer->setInterval(400);
+    auto persistAll = [this] {
+        QSettings settings;
+        for (int t = 0; t < 3; ++t) {
+            const QString prefix = QStringLiteral("appearance/%1/").arg(themeKeyForIndex(t));
+            settings.setValue(prefix + QStringLiteral("backgroundBrightness"),
+                              m_brightness[t].background);
+            settings.setValue(prefix + QStringLiteral("originalBrightness"),
+                              m_brightness[t].original);
+            settings.setValue(prefix + QStringLiteral("translationBrightness"),
+                              m_brightness[t].translation);
+        }
+    };
+    connect(persistTimer, &QTimer::timeout, this, persistAll);
+
     auto saveSliders = [=] {
         const int theme = themeBox->currentData().toInt();
         m_brightness[theme].background = backgroundSlider->value();
         m_brightness[theme].original = originalSlider->value();
         m_brightness[theme].translation = translationSlider->value();
-
-        QSettings settings;
-        const QString prefix = QStringLiteral("appearance/%1/").arg(themeKeyForIndex(theme));
-        settings.setValue(prefix + QStringLiteral("backgroundBrightness"),
-                          m_brightness[theme].background);
-        settings.setValue(prefix + QStringLiteral("originalBrightness"),
-                          m_brightness[theme].original);
-        settings.setValue(prefix + QStringLiteral("translationBrightness"),
-                          m_brightness[theme].translation);
+        persistTimer->start();
 
         if (theme == static_cast<int>(m_theme)) {
             if (m_view)
@@ -532,6 +607,8 @@ void MainWindow::openAppearanceDialog()
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     form->addRow(buttons);
     dialog.exec();
+    if (persistTimer->isActive())
+        persistAll(); // flush a pending batched write before the dialog goes away
 }
 
 void MainWindow::buildUi()
@@ -548,6 +625,13 @@ void MainWindow::buildUi()
     m_recentEpubsMenu = fileMenu->addMenu(QStringLiteral("最近開いた EPUB"));
     connect(m_recentEpubsMenu, &QMenu::aboutToShow, this, &MainWindow::updateRecentEpubsMenu);
     updateRecentEpubsMenu();
+    fileMenu->addSeparator();
+    QAction *quitAction = fileMenu->addAction(QStringLiteral("終了"));
+    quitAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
+    quitAction->setMenuRole(QAction::QuitRole); // macOS: shown in the app menu
+    // closeAllWindows (not quit()) so every window runs closeEvent — geometry,
+    // pending caches and the last-read chapter are persisted on the way out.
+    connect(quitAction, &QAction::triggered, this, [] { QApplication::closeAllWindows(); });
 
     QMenu *hlMenu = menuBar()->addMenu(QStringLiteral("ハイライト"));
     hlMenu->addAction(QStringLiteral("Kindle ノートを読み込み…"), this,
@@ -761,24 +845,67 @@ void MainWindow::buildUi()
         showSidebarTab(3);
 
     // --- web viewer ---
-    // The epub:// scheme handler is installed once, globally, on the default
-    // profile (see main()); this window just registers its book under m_schemeId.
+    // The QWebEngineView is NOT created here: constructing it initializes all
+    // of Chromium, which dominates cold-start time. A plain placeholder keeps
+    // the splitter slot; ensureWebView() swaps the real view in right after the
+    // window is shown (or immediately when a book is opened).
+    m_viewPlaceholder = new QWidget(this);
+
+    m_splitter = new QSplitter(this);
+    m_splitter->addWidget(sidebar);
+    m_splitter->addWidget(m_viewPlaceholder);
+    m_splitter->setStretchFactor(0, 0);
+    m_splitter->setStretchFactor(1, 1);
+    m_splitter->setSizes({300, 880});
+    setCentralWidget(m_splitter);
+
+    restoreViewSettings();
+}
+
+void MainWindow::ensureWebView()
+{
+    if (m_view)
+        return;
+
+    // First view in the process: install the shared epub:// handler on the
+    // default profile. Done lazily (not in main) so Chromium initializes only
+    // once a window is already on screen.
+    static bool schemeHandlerInstalled = false;
+    if (!schemeHandlerInstalled) {
+        QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
+            EpubSchemeHandler::schemeName(), EpubSchemeHandler::instance());
+        schemeHandlerInstalled = true;
+    }
+
     m_view = new QWebEngineView(this);
+    // Navigation-restricted page (see ReaderPage above).
+    auto *page = new ReaderPage(m_schemeId, m_view);
+    m_view->setPage(page);
+    // target=_blank etc.: never spawn a view — hand external links to the browser.
+    connect(page, &QWebEnginePage::newWindowRequested, this,
+            [](QWebEngineNewWindowRequest &request) {
+                const QUrl url = request.requestedUrl();
+                if (url.scheme() == QLatin1String("http")
+                    || url.scheme() == QLatin1String("https"))
+                    QDesktopServices::openUrl(url);
+            });
     // Catch EPUB drops over the page area: the view's render widget (a lazily
     // created child) handles drops itself, so watch it and its descendants.
     m_view->installEventFilter(this);
     m_view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
     m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
     connect(m_view, &QWebEngineView::loadFinished, this, &MainWindow::onLoadFinished);
+    m_view->page()->setBackgroundColor(themeBackground());
     setupWebChannel();
+    injectViewStyle(); // install the pre-paint theme script
 
-    QSplitter *splitter = new QSplitter(this);
-    splitter->addWidget(sidebar);
-    splitter->addWidget(m_view);
-    splitter->setStretchFactor(0, 0);
-    splitter->setStretchFactor(1, 1);
-    splitter->setSizes({300, 880});
-    setCentralWidget(splitter);
+    if (m_splitter && m_viewPlaceholder) {
+        const int index = m_splitter->indexOf(m_viewPlaceholder);
+        m_splitter->replaceWidget(index, m_view);
+        delete m_viewPlaceholder;
+        m_viewPlaceholder = nullptr;
+        m_splitter->setStretchFactor(index, 1);
+    }
 }
 
 void MainWindow::setupWebChannel()
@@ -786,7 +913,9 @@ void MainWindow::setupWebChannel()
     m_bridge = new Bridge(this);
     m_channel = new QWebChannel(this);
     m_channel->registerObject(QStringLiteral("spindle"), m_bridge);
-    m_view->page()->setWebChannel(m_channel);
+    // ApplicationWorld: the bridge and our scripts live in an isolated JS world
+    // (shared DOM, separate globals), out of reach of any page script.
+    m_view->page()->setWebChannel(m_channel, QWebEngineScript::ApplicationWorld);
     connect(m_bridge, &Bridge::selectionReceived, this, &MainWindow::onWebSelection);
     connect(m_bridge, &Bridge::markActivated, this, &MainWindow::onMarkClicked);
     connect(m_bridge, &Bridge::blocksReady, this, &MainWindow::onBlocksReady);
@@ -800,6 +929,37 @@ void MainWindow::setupWebChannel()
     m_summaryOllama = new OllamaClient(this);
     connect(m_summaryOllama, &OllamaClient::finished, this, &MainWindow::onSummaryFinished);
 
+    auto readResource = [](const QString &path) {
+        QFile f(path);
+        return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+    };
+
+    // qwebchannel.js must exist before our reader script runs.
+    const QString qwebchannel = readResource(QStringLiteral(":/qtwebchannel/qwebchannel.js"));
+    if (!qwebchannel.isEmpty()) {
+        QWebEngineScript s;
+        s.setName(QStringLiteral("qwebchannel"));
+        s.setSourceCode(qwebchannel);
+        s.setInjectionPoint(QWebEngineScript::DocumentCreation);
+        s.setWorldId(QWebEngineScript::ApplicationWorld);
+        s.setRunsOnSubFrames(false);
+        m_view->page()->scripts().insert(s);
+    }
+
+    const QString reader = readResource(QStringLiteral(":/reader.js"));
+    if (!reader.isEmpty()) {
+        QWebEngineScript s;
+        s.setName(QStringLiteral("spindle-reader"));
+        s.setSourceCode(reader);
+        s.setInjectionPoint(QWebEngineScript::DocumentReady);
+        s.setWorldId(QWebEngineScript::ApplicationWorld);
+        s.setRunsOnSubFrames(false);
+        m_view->page()->scripts().insert(s);
+    }
+}
+
+void MainWindow::restoreViewSettings()
+{
     QSettings settings;
     m_trTarget = settings.value(QStringLiteral("translate/target"), m_trTarget).toString();
     m_trModel = settings.value(QStringLiteral("translate/model"), m_trModel).toString();
@@ -838,34 +998,6 @@ void MainWindow::setupWebChannel()
         m_fontOverride->setChecked(fontOn);
     }
     m_fontFamily = (fontOn && m_fontCombo) ? m_fontCombo->currentFont().family() : QString();
-
-    auto readResource = [](const QString &path) {
-        QFile f(path);
-        return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
-    };
-
-    // qwebchannel.js must exist before our reader script runs.
-    const QString qwebchannel = readResource(QStringLiteral(":/qtwebchannel/qwebchannel.js"));
-    if (!qwebchannel.isEmpty()) {
-        QWebEngineScript s;
-        s.setName(QStringLiteral("qwebchannel"));
-        s.setSourceCode(qwebchannel);
-        s.setInjectionPoint(QWebEngineScript::DocumentCreation);
-        s.setWorldId(QWebEngineScript::MainWorld);
-        s.setRunsOnSubFrames(false);
-        m_view->page()->scripts().insert(s);
-    }
-
-    const QString reader = readResource(QStringLiteral(":/reader.js"));
-    if (!reader.isEmpty()) {
-        QWebEngineScript s;
-        s.setName(QStringLiteral("spindle-reader"));
-        s.setSourceCode(reader);
-        s.setInjectionPoint(QWebEngineScript::DocumentReady);
-        s.setWorldId(QWebEngineScript::MainWorld);
-        s.setRunsOnSubFrames(false);
-        m_view->page()->scripts().insert(s);
-    }
 }
 
 // --- file opening ----------------------------------------------------------
@@ -987,10 +1119,22 @@ void MainWindow::saveRecentChapter(const QString &filePath, int index, const QSt
 {
     if (filePath.isEmpty() || index < 0)
         return;
-    const QString key = recentFileKey(filePath);
+    m_recentPendingPath = filePath;
+    m_recentPendingIndex = index;
+    m_recentPendingLabel = label;
+    m_recentSave->start();
+}
+
+void MainWindow::commitRecentChapter()
+{
+    if (m_recentPendingPath.isEmpty() || m_recentPendingIndex < 0)
+        return;
+    const QString key = recentFileKey(m_recentPendingPath);
     QSettings settings;
-    settings.setValue(QStringLiteral("recent/chapters/%1/index").arg(key), index);
-    settings.setValue(QStringLiteral("recent/chapters/%1/label").arg(key), label);
+    settings.setValue(QStringLiteral("recent/chapters/%1/index").arg(key), m_recentPendingIndex);
+    settings.setValue(QStringLiteral("recent/chapters/%1/label").arg(key), m_recentPendingLabel);
+    m_recentPendingPath.clear();
+    m_recentPendingIndex = -1;
     updateRecentEpubsView();
 }
 
@@ -1046,6 +1190,7 @@ bool MainWindow::openEpub(const QString &filePath)
 
     m_book = std::move(book);
     m_epubPath = filePath;
+    ensureWebView(); // displayChapter below needs the (lazily created) view
     EpubSchemeHandler::instance()->registerBook(m_schemeId, m_book.get());
     m_chapterTexts.clear();
     m_chapterTextsReady = false;
@@ -1069,6 +1214,7 @@ bool MainWindow::openEpub(const QString &filePath)
     displayChapter(savedChapter);
     showSidebarTab(0);
     addRecentEpub(filePath);
+    startChapterTextsBuild();
     return true;
 }
 
@@ -1129,7 +1275,9 @@ void MainWindow::displayChapter(int index, const QString &fragment)
                            "line-height:1.5;padding:16px;margin:0;}</style></head><body><pre>%1"
                            "</pre></body></html>")
                 .arg(raw);
-        m_view->page()->setBackgroundColor(themeBackground());
+        injectViewStyle(); // refresh the pre-paint style script for this mode
+        m_view->setUpdatesEnabled(false); // hold the old frame until the load ends
+        m_viewUnfreeze->start();
         m_view->setHtml(html);
         updateLocation();
         updateNavButtons();
@@ -1152,7 +1300,9 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     QString urlStr = EpubSchemeHandler::urlFor(m_schemeId, chapter.path);
     if (!fragment.isEmpty())
         urlStr += QLatin1Char('#') + fragment;
-    m_view->page()->setBackgroundColor(themeBackground());
+    injectViewStyle(); // refresh the pre-paint style script before navigating
+    m_view->setUpdatesEnabled(false); // hold the old frame until the load ends
+    m_viewUnfreeze->start();
     m_view->setUrl(QUrl(urlStr));
 
     updateLocation();
@@ -1161,6 +1311,10 @@ void MainWindow::displayChapter(int index, const QString &fragment)
 
 void MainWindow::onLoadFinished(bool ok)
 {
+    // Unfreeze first, success or not — the view must never stay frozen.
+    m_viewUnfreeze->stop();
+    if (m_view)
+        m_view->setUpdatesEnabled(true);
     if (!ok)
         return;
     applyZoom();
@@ -1173,7 +1327,7 @@ void MainWindow::onLoadFinished(bool ok)
             "(function(){var e=document.getElementById(%1)||"
             "document.getElementsByName(%1)[0];if(e)e.scrollIntoView();})();")
             .arg(QStringLiteral("'") + frag + QStringLiteral("'"));
-        m_view->page()->runJavaScript(js);
+        m_view->page()->runJavaScript(js, QWebEngineScript::ApplicationWorld);
     }
     if (!m_pendingFind.isEmpty()) {
         const QString find = m_pendingFind;
@@ -1202,10 +1356,8 @@ QColor MainWindow::themeBackground() const
     return adjustedBrightness(baseThemeBackgroundForIndex(idx), m_brightness[idx].background);
 }
 
-void MainWindow::injectViewStyle()
+QString MainWindow::viewStyleCss() const
 {
-    if (!m_view)
-        return;
     const QString bg = themeBackground().name();
     const QString original = originalTextColor().name();
     const QString translation = translationTextColor().name();
@@ -1226,13 +1378,65 @@ void MainWindow::injectViewStyle()
             .remove(QLatin1Char('\\'));
         css += QStringLiteral(" body, body *{ font-family:'%1' !important; }").arg(fam);
     }
+    return css;
+}
 
-    const QString js = QStringLiteral(
-        "(function(){var s=document.getElementById('__spindle_theme');"
-        "if(!s){s=document.createElement('style');s.id='__spindle_theme';"
-        "document.documentElement.appendChild(s);}s.textContent=`%1`;})();")
+// JS that installs/refreshes the __spindle_theme <style>. Robust to running at
+// DocumentCreation, where document.documentElement may not exist yet (the
+// MutationObserver fires the moment <html> is inserted, before any paint —
+// unlike readystatechange, which can arrive after the first render).
+static QString themeStyleJs(const QString &css)
+{
+    return QStringLiteral(
+               "(function(){function apply(){var s=document.getElementById('__spindle_theme');"
+               "if(!s){s=document.createElement('style');s.id='__spindle_theme';"
+               "(document.documentElement||document.head).appendChild(s);}s.textContent=`%1`;}"
+               "if(document.documentElement){apply();}"
+               "else{new MutationObserver(function(m,o){if(document.documentElement){"
+               "o.disconnect();apply();}}).observe(document,{childList:true});}})();")
         .arg(css);
-    m_view->page()->runJavaScript(js);
+}
+
+void MainWindow::updateThemeScript(const QString &css)
+{
+    if (!m_view)
+        return;
+    QWebEngineScriptCollection &scripts = m_view->page()->scripts();
+    const QList<QWebEngineScript> existing = scripts.find(QStringLiteral("spindle-theme"));
+    for (const QWebEngineScript &s : existing)
+        scripts.remove(s);
+    QWebEngineScript s;
+    s.setName(QStringLiteral("spindle-theme"));
+    s.setSourceCode(themeStyleJs(css));
+    s.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    s.setWorldId(QWebEngineScript::ApplicationWorld);
+    s.setRunsOnSubFrames(false);
+    scripts.insert(s);
+}
+
+void MainWindow::injectViewStyle()
+{
+    if (!m_view)
+        return;
+    // Keep every layer that can show through during a navigation in the theme
+    // color: the page background AND the view widget's own palette (otherwise
+    // the default near-white widget background flashes when Chromium swaps
+    // render surfaces between documents).
+    const QColor bgColor = themeBackground();
+    m_view->page()->setBackgroundColor(bgColor);
+    QPalette pal = m_view->palette();
+    pal.setColor(QPalette::Window, bgColor);
+    pal.setColor(QPalette::Base, bgColor);
+    m_view->setPalette(pal);
+    m_view->setAutoFillBackground(true);
+
+    const QString css = viewStyleCss();
+    // Primary path: the scheme handler embeds this CSS into every served
+    // chapter document, so pages arrive already styled — no script timing.
+    EpubSchemeHandler::instance()->setThemeCss(m_schemeId, css);
+    updateThemeScript(css); // backup + XML source view (setHtml, not served)
+    m_view->page()->runJavaScript(themeStyleJs(css),
+                                  QWebEngineScript::ApplicationWorld); // current page
 }
 
 QColor MainWindow::originalTextColor() const
@@ -1327,7 +1531,8 @@ void MainWindow::cycleTheme()
 {
     m_theme = static_cast<Theme>((static_cast<int>(m_theme) + 1) % 3);
     QSettings().setValue(QStringLiteral("view/theme"), static_cast<int>(m_theme));
-    m_view->page()->setBackgroundColor(themeBackground());
+    if (m_view)
+        m_view->page()->setBackgroundColor(themeBackground());
     injectViewStyle();
 }
 
@@ -1346,10 +1551,49 @@ void MainWindow::onSearchTextChanged()
     updateSidebarMode();
 }
 
+void MainWindow::startChapterTextsBuild()
+{
+    if (!m_book || m_chapterTextsReady || m_chapterTextsBuilding)
+        return;
+    // Read the raw XHTML on this thread (the zip reader is not thread-safe and
+    // is shared with the scheme handler); the parse-heavy build runs on a
+    // worker so the first search / summary / import doesn't stall the UI.
+    QVector<ChapterSource> sources;
+    sources.reserve(m_book->chapters().size());
+    for (const Chapter &ch : m_book->chapters()) {
+        if (!m_book->contains(ch.path))
+            continue;
+        sources.append({ch.path, ch.label, m_book->readText(ch.path)});
+    }
+    m_chapterTextsBuilding = true;
+    m_chapterTextsFuture = QtConcurrent::run(buildChapterTextsFromSources, sources);
+    if (!m_chapterTextsWatcher) {
+        m_chapterTextsWatcher = new QFutureWatcher<QVector<ChapterText>>(this);
+        connect(m_chapterTextsWatcher, &QFutureWatcherBase::finished, this,
+                &MainWindow::adoptChapterTexts);
+    }
+    m_chapterTextsWatcher->setFuture(m_chapterTextsFuture);
+}
+
+void MainWindow::adoptChapterTexts()
+{
+    if (m_chapterTextsReady || !m_chapterTextsBuilding || !m_chapterTextsFuture.isFinished())
+        return;
+    m_chapterTexts = m_chapterTextsFuture.result();
+    m_chapterTextsReady = true;
+    m_chapterTextsBuilding = false;
+}
+
 void MainWindow::ensureChapterTexts()
 {
     if (m_chapterTextsReady || !m_book)
         return;
+    if (m_chapterTextsBuilding) {
+        // Background build already in flight — just wait for it (usually done).
+        m_chapterTextsFuture.waitForFinished();
+        adoptChapterTexts();
+        return;
+    }
     QVector<ChapterRef> refs;
     refs.reserve(m_book->chapters().size());
     for (const Chapter &ch : m_book->chapters())
@@ -1690,7 +1934,11 @@ void MainWindow::persistHighlights()
         return;
     BookRef ref{m_bookId, m_book ? m_book->title() : QString(),
                 m_book ? m_book->author() : QString()};
-    highlight_store::save(m_epubPath, ref, m_highlights);
+    if (!highlight_store::save(m_epubPath, ref, m_highlights)) {
+        statusBar()->showMessage(
+            QStringLiteral("ハイライトの保存に失敗しました: %1")
+                .arg(highlight_store::filePathFor(m_epubPath)), 8000);
+    }
 }
 
 // --- import / export -------------------------------------------------------
@@ -1720,9 +1968,11 @@ void MainWindow::exportHighlightsMarkdown()
         QStringLiteral("Markdown (*.md)"));
     if (path.isEmpty())
         return;
-    QFile f(path);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        f.write(md.toUtf8());
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(md.toUtf8()) < 0 || !f.commit()) {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("書き出しに失敗しました:\n%1").arg(f.errorString()));
+    }
 }
 
 void MainWindow::exportHighlightsJson()
@@ -1747,9 +1997,12 @@ void MainWindow::exportHighlightsJson()
         QStringLiteral("JSON (*.json)"));
     if (path.isEmpty())
         return;
-    QFile f(path);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        f.write(highlight_store::serializeFile(file));
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(highlight_store::serializeFile(file)) < 0
+        || !f.commit()) {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("書き出しに失敗しました:\n%1").arg(f.errorString()));
+    }
 }
 
 void MainWindow::exportChapterAozora()
@@ -1774,9 +2027,11 @@ void MainWindow::exportChapterAozora()
         QStringLiteral("XHTML (*.html *.xhtml)"));
     if (path.isEmpty())
         return;
-    QFile f(path);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        f.write(xhtml.toUtf8());
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(xhtml.toUtf8()) < 0 || !f.commit()) {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("書き出しに失敗しました:\n%1").arg(f.errorString()));
+    }
 }
 
 void MainWindow::exportTranslatedEpub(int mode)
@@ -1786,79 +2041,170 @@ void MainWindow::exportTranslatedEpub(int mode)
                                  QStringLiteral("先に EPUB を開いてください。"));
         return;
     }
-    const auto emode = mode == 1 ? translated_epub::Mode::Translation
-                                 : translated_epub::Mode::Bilingual;
-    const QString label = mode == 1 ? QStringLiteral("訳文") : QStringLiteral("対訳");
-    const bool translationNeeded = !isBookLanguage(m_trTarget);
+    if (m_exportActive) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("翻訳エクスポートを実行中です。"));
+        return;
+    }
+    m_exportMode = mode;
 
     // Translate any paragraphs not yet cached, filling the cache.
-    const QStringList missing = translated_epub::collectMissing(*m_book, m_trCache);
-    if (translationNeeded && !missing.isEmpty()) {
-        QProgressDialog progress(
-            QStringLiteral("未翻訳の段落を翻訳しています（%1 へ: %2）…")
-                .arg(targetLanguageName(m_trTarget), m_trModel),
-            QStringLiteral("キャンセル"), 0, missing.size(), this);
-        progress.setWindowModality(Qt::WindowModal);
-        progress.setMinimumDuration(0);
-
-        OllamaClient client;
-        auto translateForExport = [&](const QString &text, QString *out) {
-            QEventLoop loop;
-            bool ok = false;
-            QString result;
-            auto conn = connect(&client, &OllamaClient::finished, &loop,
-                                [&](int, bool o, const QString &r) {
-                                    ok = o;
-                                    result = r;
-                                    loop.quit();
-                                });
-            client.translate(m_trEndpoint, m_trModel, targetLanguagePrompt(m_trTarget), text,
-                             m_trGlossary.promptBlockForText(text));
-            loop.exec();
-            disconnect(conn);
-
-            *out = result;
-            return ok;
-        };
-
-        int done = 0;
-        for (const QString &text : missing) {
-            if (progress.wasCanceled())
-                return;
-            progress.setValue(done);
-
-            QString out;
-            if (!translateForExport(text, &out)) {
-                const QString targetName = targetLanguageName(m_trTarget);
-                const QString targetPrompt = targetLanguagePrompt(m_trTarget);
-                const QString glossary = m_trGlossary.promptBlockForText(text);
-                const QString diagnosticPath = translationDiagnosticPath(m_epubPath);
-                QString diagnosticError;
-                QString diagnosticMessage;
-                if (writeTranslationDiagnostic(
-                        diagnosticPath, &diagnosticError, m_epubPath, m_book->title(),
-                        m_book->language(), m_trEndpoint, m_trModel, targetName, m_trTarget,
-                        targetPrompt, glossary, text, done + 1, missing.size(), out)) {
-                    diagnosticMessage =
-                        QStringLiteral("送信した全文を保存しました:\n%1").arg(diagnosticPath);
-                } else if (!diagnosticError.isEmpty()) {
-                    diagnosticMessage =
-                        QStringLiteral("診断ファイルを保存できませんでした: %1").arg(diagnosticError);
-                }
-                QMessageBox::warning(
-                    this, QStringLiteral("Spindle"),
-                    translationExportFailureMessage(out, text, done + 1, missing.size(),
-                                                    targetName, m_trTarget, m_trModel,
-                                                    diagnosticMessage));
-                m_trCache.flush();
-                return;
-            }
-            m_trCache.put(text, out);
-            ++done;
-        }
-        progress.setValue(missing.size());
-        m_trCache.flush();
+    const bool translationNeeded = !isBookLanguage(m_trTarget);
+    QStringList missing;
+    if (translationNeeded)
+        missing = translated_epub::collectMissing(*m_book, m_trCache);
+    if (missing.isEmpty()) {
+        finishTranslatedEpubExport();
+        return;
     }
+    startTranslatedEpubExport(missing);
+}
+
+void MainWindow::startTranslatedEpubExport(const QStringList &missing)
+{
+    m_exportActive = true;
+    m_exportQueue = missing;
+    m_exportCursor = 0;
+    m_exportInFlight = 0;
+    m_exportDone = 0;
+    m_exportReqs.clear();
+
+    if (!m_exportOllama) {
+        m_exportOllama = new OllamaClient(this);
+        connect(m_exportOllama, &OllamaClient::finished, this,
+                &MainWindow::onExportTranslateFinished);
+    }
+
+    // Signal-driven progress dialog (no nested event loop, no processEvents):
+    // requests run kTranslateConcurrency at a time; cancel keeps what finished.
+    m_exportDialog = new QDialog(this);
+    m_exportDialog->setWindowTitle(QStringLiteral("翻訳エクスポート"));
+    m_exportDialog->setWindowModality(Qt::WindowModal);
+    QVBoxLayout *layout = new QVBoxLayout(m_exportDialog);
+    QLabel *label = new QLabel(QStringLiteral("未翻訳の段落を翻訳しています（%1 へ: %2）…")
+                                   .arg(targetLanguageName(m_trTarget), m_trModel),
+                               m_exportDialog);
+    label->setWordWrap(true);
+    m_exportBar = new QProgressBar(m_exportDialog);
+    m_exportBar->setRange(0, m_exportQueue.size());
+    m_exportBar->setValue(0);
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, m_exportDialog);
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
+    connect(buttons, &QDialogButtonBox::rejected, m_exportDialog, &QDialog::reject);
+    connect(m_exportDialog, &QDialog::rejected, this, &MainWindow::cancelTranslatedEpubExport);
+    layout->addWidget(label);
+    layout->addWidget(m_exportBar);
+    layout->addWidget(buttons);
+    m_exportDialog->show();
+
+    exportTranslateNext();
+}
+
+void MainWindow::exportTranslateNext()
+{
+    if (!m_exportActive)
+        return;
+    while (m_exportInFlight < kTranslateConcurrency && m_exportCursor < m_exportQueue.size()) {
+        const QString text = m_exportQueue.at(m_exportCursor);
+        ++m_exportCursor;
+        const int reqId = ++m_trReqSeq;
+        m_exportReqs.insert(reqId, text);
+        ++m_exportInFlight;
+        m_exportOllama->translate(m_trEndpoint, m_trModel, targetLanguagePrompt(m_trTarget), text,
+                                  m_trGlossary.promptBlockForText(text), reqId);
+    }
+}
+
+void MainWindow::onExportTranslateFinished(int requestId, bool ok, const QString &result)
+{
+    const auto it = m_exportReqs.find(requestId);
+    if (it == m_exportReqs.end())
+        return; // canceled / superseded run
+    const QString text = it.value();
+    m_exportReqs.erase(it);
+    if (!m_exportActive)
+        return;
+    --m_exportInFlight;
+
+    if (!ok) {
+        const int total = m_exportQueue.size();
+        const int failedIndex = m_exportDone + 1;
+        m_exportActive = false;
+        m_exportQueue.clear();
+        m_exportReqs.clear();
+        m_exportInFlight = 0;
+        m_trCache.flush(); // keep the paragraphs that did translate
+        closeExportDialog();
+
+        const QString targetName = targetLanguageName(m_trTarget);
+        const QString targetPrompt = targetLanguagePrompt(m_trTarget);
+        const QString glossary = m_trGlossary.promptBlockForText(text);
+        const QString diagnosticPath = translationDiagnosticPath(m_epubPath);
+        QString diagnosticError;
+        QString diagnosticMessage;
+        if (writeTranslationDiagnostic(
+                diagnosticPath, &diagnosticError, m_epubPath,
+                m_book ? m_book->title() : QString(), m_book ? m_book->language() : QString(),
+                m_trEndpoint, m_trModel, targetName, m_trTarget, targetPrompt, glossary, text,
+                failedIndex, total, result)) {
+            diagnosticMessage =
+                QStringLiteral("送信した全文を保存しました:\n%1").arg(diagnosticPath);
+        } else if (!diagnosticError.isEmpty()) {
+            diagnosticMessage =
+                QStringLiteral("診断ファイルを保存できませんでした: %1").arg(diagnosticError);
+        }
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             translationExportFailureMessage(result, text, failedIndex, total,
+                                                             targetName, m_trTarget, m_trModel,
+                                                             diagnosticMessage));
+        return;
+    }
+
+    m_trCache.put(text, result);
+    ++m_exportDone;
+    if (m_exportBar)
+        m_exportBar->setValue(m_exportDone);
+
+    if (m_exportCursor >= m_exportQueue.size() && m_exportInFlight == 0) {
+        m_exportActive = false;
+        m_exportQueue.clear();
+        m_trCache.flush();
+        closeExportDialog();
+        finishTranslatedEpubExport();
+        return;
+    }
+    exportTranslateNext();
+}
+
+void MainWindow::cancelTranslatedEpubExport()
+{
+    if (!m_exportActive)
+        return;
+    m_exportActive = false;
+    m_exportQueue.clear();
+    m_exportReqs.clear(); // in-flight replies become no-ops
+    m_exportInFlight = 0;
+    m_trCache.flush(); // keep the paragraphs translated so far
+    closeExportDialog();
+}
+
+void MainWindow::closeExportDialog()
+{
+    if (m_exportDialog) {
+        m_exportDialog->hide();
+        m_exportDialog->deleteLater();
+        m_exportDialog = nullptr;
+        m_exportBar = nullptr;
+    }
+}
+
+void MainWindow::finishTranslatedEpubExport()
+{
+    if (!m_book || m_epubPath.isEmpty())
+        return;
+    const auto emode = m_exportMode == 1 ? translated_epub::Mode::Translation
+                                         : translated_epub::Mode::Bilingual;
+    const QString label = m_exportMode == 1 ? QStringLiteral("訳文") : QStringLiteral("対訳");
 
     QString suggested = m_book->title().isEmpty() ? QStringLiteral("book") : m_book->title();
     suggested.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
@@ -1959,9 +2305,6 @@ void MainWindow::onBlocksReady(const QString &json)
     translateNext(run);
 }
 
-// Number of Ollama requests kept in flight at once.
-static constexpr int kTranslateConcurrency = 2;
-
 void MainWindow::translateNext(int run)
 {
     if (run != m_trRunId)
@@ -2020,12 +2363,13 @@ void MainWindow::translateSelection(const QString &text)
         return;
     showTranslatePopup(QStringLiteral("翻訳中…"));
     m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), src,
-                                 m_trGlossary.promptBlockForText(src));
+                                 m_trGlossary.promptBlockForText(src), ++m_selectionReqSeq);
 }
 
 void MainWindow::onSelectionTranslated(int requestId, bool ok, const QString &result)
 {
-    Q_UNUSED(requestId);
+    if (requestId != m_selectionReqSeq)
+        return; // reply from an earlier selection — a newer one is in flight
     if (!m_translatePopup || !m_translatePopup->isVisible())
         return;
     showTranslatePopup(ok ? result : QStringLiteral("⚠ 翻訳に失敗しました: ") + result);
@@ -2042,9 +2386,10 @@ void MainWindow::summarizeSelection(const QString &text)
     m_summaryTruncated = false;
     showSummaryDialog(QStringLiteral("選択範囲の要約 (%1)").arg(summaryDetailLabel()),
                       QStringLiteral("要約中…"));
+    m_summaryReqIsTranslate = false;
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), src, summaryDetailInstruction(),
-                               m_trGlossary.promptBlockForText(src));
+                               m_trGlossary.promptBlockForText(src), ++m_summaryReqSeq);
 }
 
 void MainWindow::summarizeCurrentChapter()
@@ -2110,9 +2455,10 @@ void MainWindow::generateCurrentChapterSummary(bool force)
                       m_summaryTruncated
                           ? QStringLiteral("要約中…（章が長いため先頭部分を要約します）")
                           : QStringLiteral("要約中…"));
+    m_summaryReqIsTranslate = false;
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), text, summaryDetailInstruction(),
-                               m_trGlossary.promptBlockForText(text));
+                               m_trGlossary.promptBlockForText(text), ++m_summaryReqSeq);
 }
 
 void MainWindow::openSavedCurrentChapterSummary()
@@ -2233,23 +2579,26 @@ void MainWindow::translateCurrentSummary()
     m_summarySaveable = false;
     showSummaryDialog(QStringLiteral("要約を翻訳中 (%1)").arg(targetLanguageName(m_trTarget)),
                       QStringLiteral("翻訳中…"));
+    m_summaryReqIsTranslate = true;
     m_summaryOllama->translate(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), src,
-                               m_trGlossary.promptBlockForText(src), kSummaryTranslateRequestId);
+                               m_trGlossary.promptBlockForText(src), ++m_summaryReqSeq);
 }
 
 void MainWindow::onSummaryFinished(int requestId, bool ok, const QString &result)
 {
+    if (requestId != m_summaryReqSeq)
+        return; // reply from a superseded request — a newer one is in flight
     if (!m_summaryDialog || !m_summaryDialog->isVisible())
         return;
     if (!ok) {
         showSummaryDialog(m_summaryDialog->windowTitle(),
-                          requestId == kSummaryTranslateRequestId
+                          m_summaryReqIsTranslate
                               ? QStringLiteral("⚠ 翻訳に失敗しました: ") + result
                               : QStringLiteral("⚠ 要約に失敗しました: ") + result);
         return;
     }
-    if (requestId == kSummaryTranslateRequestId) {
+    if (m_summaryReqIsTranslate) {
         m_summarySaveable = !m_summaryChapterPath.isEmpty();
         const QString title = m_summaryPreTranslateTitle.isEmpty()
                                   ? QStringLiteral("要約")

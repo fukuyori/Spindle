@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSaveFile>
 
 namespace highlight_store {
 
@@ -136,18 +137,21 @@ QVector<Highlight> load(const QString &epubPath)
     return file.highlights;
 }
 
-void save(const QString &epubPath, const BookRef &book, const QVector<Highlight> &highlights)
+bool save(const QString &epubPath, const BookRef &book, const QVector<Highlight> &highlights)
 {
     const QString path = filePathFor(epubPath);
     if (path.isEmpty())
-        return;
+        return false;
     BookHighlightFile file;
     file.version = 2;
     file.book = book;
     file.highlights = highlights;
-    QFile f(path);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        f.write(serializeFile(file));
+    // Atomic replace: a crash mid-write must not destroy the user's highlights.
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+        return false;
+    f.write(serializeFile(file));
+    return f.commit();
 }
 
 void upsert(QVector<Highlight> &list, const Highlight &highlight)

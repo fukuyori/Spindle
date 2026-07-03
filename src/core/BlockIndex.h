@@ -19,8 +19,23 @@ struct BlockInfo {
 // Leaf blocks of the chapter, in document order. Empty if the XHTML won't parse.
 QVector<BlockInfo> enumerateBlocks(const QString &xhtml);
 
-// Return the chapter XHTML with data-spindle-block="N" added to each leaf block.
-// Returns an empty string if the XHTML won't parse (caller serves the original).
-QString injectBlockIds(const QString &xhtml);
+// Body text + leaf blocks extracted from a single parse of the chapter XHTML
+// (enumerateBlocks and the body textContent share one QDomDocument). `ok` is
+// false when the markup won't parse at all.
+struct ChapterScan {
+    bool ok = false;
+    QString bodyText; // textContent of <body> (script/style skipped, nbsp -> space)
+    QVector<BlockInfo> blocks;
+};
+ChapterScan scanChapter(const QString &xhtml);
+
+// Return the chapter XHTML with data-spindle-block="N" added to each leaf block,
+// and active content stripped (<script>, on* handlers, javascript: URLs — book
+// scripting is not supported). When themeCss is non-empty a
+// <style id="__spindle_theme"> element carrying it is embedded (end of <head>),
+// so the served document paints with the reader theme on its very first frame.
+// Returns an empty string if the XHTML won't parse (the caller must then scrub
+// the original by other means before serving it).
+QString injectBlockIds(const QString &xhtml, const QString &themeCss = QString());
 
 } // namespace block_index

@@ -2,6 +2,7 @@
 
 #include "epub/ZipArchive.h"
 
+#include <QHash>
 #include <QString>
 #include <QVector>
 #include <memory>
@@ -70,4 +71,5 @@ private:
     bool m_verticalRtl = false;
     QVector<Chapter> m_chapters;
     QVector<TocItem> m_toc;
+    QHash<QString, int> m_chapterIndexByPath; // zip path -> spine index
 };

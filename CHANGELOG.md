@@ -4,6 +4,49 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-04
+
+### Added
+- **Quit shortcut** — Ctrl+Q (ファイル > 終了) closes every window, persisting
+  window geometry, caches, and the last-read chapter on the way out.
+
+### Changed
+- **Faster startup** — the window appears immediately; Chromium (Qt WebEngine)
+  now initializes after the window is shown, and books opened from the command
+  line load after the frame is up.
+- **Flicker-free chapter navigation** — the reader theme CSS is embedded into
+  served chapter documents so the first painted frame is already styled, view
+  repaints are held during navigation, and the view widget's palette follows
+  the theme.
+- **Faster chapter navigation** — served chapter documents (block ids + theme
+  CSS) are cached per book, and leaf-block enumeration is a single pass.
+- **Background text indexing** — chapter texts are built on a worker thread
+  right after a book opens, so the first search, chapter summary, or Kindle
+  import no longer freezes the UI; search also stops re-lowercasing the whole
+  book on every keystroke.
+- **Translated-EPUB export** now runs two translation requests in parallel with
+  a cancellable progress dialog (no nested event loop); cancelling keeps the
+  paragraphs already translated in the cache.
+
+### Fixed
+- **Ollama requests now time out** (5 minutes) instead of leaving "翻訳中…"
+  stuck forever when the server hangs.
+- **Stale AI replies** from superseded selection-translation and summary
+  requests no longer overwrite newer results.
+- **Atomic saves** — highlights, translation caches, and all exports are
+  written via temp-file replace so a crash can no longer corrupt them, and
+  write failures are reported instead of ignored.
+
+### Security
+- **Navigation policy** — the reading pane only navigates within the current
+  book; external links open in the system browser and everything else is
+  refused.
+- **Book scripting disabled** — served chapters are sanitized (`<script>`,
+  event-handler attributes, and `javascript:` URLs removed), and the web
+  channel bridge now lives in an isolated JavaScript world out of page reach.
+- **Zip-bomb protection** — archive entries that decompress beyond 512 MB are
+  refused.
+
 ## [0.3.5] - 2026-06-27
 
 ### Changed

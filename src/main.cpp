@@ -6,7 +6,6 @@
 #include <QFileOpenEvent>
 #include <QIcon>
 #include <QTimer>
-#include <QWebEngineProfile>
 
 namespace {
 
@@ -49,9 +48,10 @@ int main(int argc, char *argv[])
     app.setApplicationVersion(QStringLiteral(SPINDLE_VERSION));
     app.setWindowIcon(QIcon(QStringLiteral(":/spindle.png")));
 
-    // One shared scheme handler on the default profile serves every window's book.
-    QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
-        EpubSchemeHandler::schemeName(), EpubSchemeHandler::instance());
+    // The epub:// handler is installed on the default profile lazily, by the
+    // first MainWindow that creates its web view (see ensureWebView). Touching
+    // the profile here would initialize all of Chromium before any window is
+    // visible, which dominates cold-start time.
 
     // Open each EPUB passed on the command line in its own window.
     const QStringList args = app.arguments();

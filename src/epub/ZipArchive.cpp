@@ -56,6 +56,13 @@ QByteArray ZipArchive::readBytes(const QString &path) const
     if (index < 0)
         return {};
 
+    // Refuse absurdly large entries (zip bombs) instead of exhausting memory.
+    static constexpr mz_uint64 kMaxEntryBytes = 512ull * 1024 * 1024;
+    mz_zip_archive_file_stat st;
+    if (!mz_zip_reader_file_stat(&m_d->zip, static_cast<mz_uint>(index), &st)
+        || st.m_uncomp_size > kMaxEntryBytes)
+        return {};
+
     size_t size = 0;
     void *data = mz_zip_reader_extract_to_heap(&m_d->zip, static_cast<mz_uint>(index), &size, 0);
     if (!data)

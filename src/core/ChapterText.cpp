@@ -86,6 +86,7 @@ ChapterText buildChapterText(const ChapterRef &ref, const QString &body)
         }
     }
     ct.normalizedBody = normalized;
+    ct.normalizedLower = normalized.toLower();
     ct.normalizedToOriginal = normMap;
 
     // compact: strip all whitespace.
@@ -105,18 +106,30 @@ ChapterText buildChapterText(const ChapterRef &ref, const QString &body)
     return ct;
 }
 
-QVector<ChapterText> buildChapterTexts(const EpubBook &book,
-                                       const QVector<ChapterRef> &chapters)
+QVector<ChapterText> buildChapterTextsFromSources(const QVector<ChapterSource> &sources)
 {
     QVector<ChapterText> out;
-    out.reserve(chapters.size());
-    for (const ChapterRef &ref : chapters) {
-        if (!book.contains(ref.path))
-            continue;
-        const QString xhtml = book.readText(ref.path);
-        ChapterText ct = buildChapterText(ref, extractChapterBody(xhtml));
-        ct.blocks = block_index::enumerateBlocks(xhtml);
+    out.reserve(sources.size());
+    for (const ChapterSource &src : sources) {
+        // One parse per chapter: body text and leaf blocks come from the same
+        // QDomDocument (scanChapter) instead of two independent parses.
+        const block_index::ChapterScan scan = block_index::scanChapter(src.xhtml);
+        ChapterText ct = buildChapterText(ChapterRef{src.path, src.label}, scan.bodyText);
+        ct.blocks = scan.blocks;
         out.append(ct);
     }
     return out;
+}
+
+QVector<ChapterText> buildChapterTexts(const EpubBook &book,
+                                       const QVector<ChapterRef> &chapters)
+{
+    QVector<ChapterSource> sources;
+    sources.reserve(chapters.size());
+    for (const ChapterRef &ref : chapters) {
+        if (!book.contains(ref.path))
+            continue;
+        sources.append({ref.path, ref.label, book.readText(ref.path)});
+    }
+    return buildChapterTextsFromSources(sources);
 }

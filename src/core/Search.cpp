@@ -27,7 +27,9 @@ QVector<SearchHit> searchChapters(const QVector<ChapterText> &chapters,
     queryNormalized = queryNormalized.toLower();
 
     for (const ChapterText &chapter : chapters) {
-        const QString haystack = chapter.normalizedBody.toLower();
+        // Prebuilt in buildChapterText — avoids re-lowercasing the whole book
+        // on every (debounced) keystroke.
+        const QString &haystack = chapter.normalizedLower;
         int from = 0;
         while (true) {
             const int index = haystack.indexOf(queryNormalized, from);

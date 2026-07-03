@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QSaveFile>
 
 QString TranslationCache::normalizeKey(const QString &text)
 {
@@ -75,9 +76,11 @@ void TranslationCache::flush() const
     root[QStringLiteral("lang")] = m_lang;
     root[QStringLiteral("entries")] = entries;
 
-    QFile f(filePath());
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    // Atomic replace: a crash mid-write must not corrupt the existing cache.
+    QSaveFile f(filePath());
+    if (f.open(QIODevice::WriteOnly)) {
         f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
-        m_dirty = false;
+        if (f.commit())
+            m_dirty = false;
     }
 }

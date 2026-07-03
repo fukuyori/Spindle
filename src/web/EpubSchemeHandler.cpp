@@ -4,6 +4,8 @@
 #include "epub/EpubBook.h"
 
 #include <QBuffer>
+#include <QRegularExpression>
+#include <QStringConverter>
 #include <QUrl>
 #include <QWebEngineUrlRequestJob>
 #include <QWebEngineUrlScheme>
@@ -32,6 +34,36 @@ QByteArray mimeFor(const QString &path)
     return "application/octet-stream";
 }
 
+// Best-effort script scrub for chapter documents that QDom couldn't parse (the
+// sanitizing injectBlockIds pass never ran on them). Regex on decoded UTF-8:
+// coarse, but ApplicationWorld isolation keeps the bridge out of page reach
+// regardless — this is defense in depth. Returns a null QByteArray when the
+// bytes aren't valid UTF-8 (then the caller serves the original untouched).
+QByteArray scrubActiveContent(const QByteArray &bytes)
+{
+    QStringDecoder decoder(QStringConverter::Utf8, QStringConverter::Flag::Stateless);
+    QString text = decoder.decode(bytes);
+    if (decoder.hasError())
+        return {};
+    static const QRegularExpression scriptBlock(
+        QStringLiteral("<script\\b[^>]*>.*?</script[^>]*>"),
+        QRegularExpression::CaseInsensitiveOption
+            | QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression scriptTag(QStringLiteral("<script\\b[^>]*/?>"),
+                                              QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression onAttr(
+        QStringLiteral("\\son[a-zA-Z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression jsUrl(
+        QStringLiteral("(href|src)\\s*=\\s*([\"'])\\s*javascript:[^\"']*\\2"),
+        QRegularExpression::CaseInsensitiveOption);
+    text.remove(scriptBlock);
+    text.remove(scriptTag); // unclosed <script> after the block pass
+    text.remove(onAttr);
+    text.replace(jsUrl, QStringLiteral("\\1=\\2#\\2"));
+    return text.toUtf8();
+}
+
 } // namespace
 
 EpubSchemeHandler::EpubSchemeHandler(QObject *parent)
@@ -48,11 +80,32 @@ EpubSchemeHandler *EpubSchemeHandler::instance()
 void EpubSchemeHandler::registerBook(const QString &id, EpubBook *book)
 {
     m_books.insert(id, book);
+    dropCachedEntries(id); // a re-registered id serves a different book
 }
 
 void EpubSchemeHandler::unregisterBook(const QString &id)
 {
     m_books.remove(id);
+    m_themeCss.remove(id);
+    dropCachedEntries(id);
+}
+
+void EpubSchemeHandler::setThemeCss(const QString &id, const QString &css)
+{
+    if (m_themeCss.value(id) == css)
+        return; // unchanged — keep the cached styled documents
+    m_themeCss.insert(id, css);
+    dropCachedEntries(id);
+}
+
+void EpubSchemeHandler::dropCachedEntries(const QString &id)
+{
+    const QString prefix = id + QLatin1Char('/');
+    const QList<QString> keys = m_injected.keys();
+    for (const QString &key : keys) {
+        if (key.startsWith(prefix))
+            m_injected.remove(key);
+    }
 }
 
 QString EpubSchemeHandler::urlFor(const QString &id, const QString &zipPath)
@@ -104,11 +157,41 @@ void EpubSchemeHandler::requestStarted(QWebEngineUrlRequestJob *job)
     // For chapter documents, inject document-order block ids so highlight
     // anchoring shares one coordinate system with C++ (see BlockIndex). If the
     // markup won't parse, fall back to serving the original bytes untouched.
+    // Injection is a full DOM parse + serialize, so successful results are
+    // cached per (book id, path).
     if (mime == "application/xhtml+xml" || mime == "text/html") {
-        const QString injected = block_index::injectBlockIds(book->readText(zipPath));
-        if (!injected.isEmpty()) {
-            data = injected.toUtf8();
+        const QString cacheKey = id + QLatin1Char('/') + zipPath;
+        if (const QByteArray *cached = m_injected.object(cacheKey)) {
+            data = *cached;
             mime += "; charset=utf-8";
+        } else {
+            const QString themeCss = m_themeCss.value(id);
+            const QString injected =
+                block_index::injectBlockIds(book->readText(zipPath), themeCss);
+            if (!injected.isEmpty()) {
+                data = injected.toUtf8();
+            } else {
+                // Unparseable markup: the sanitizing DOM pass never ran, so
+                // scrub scripts from the original before serving it.
+                data = scrubActiveContent(book->readBytes(zipPath));
+                // Best-effort theme embedding so even this path paints styled.
+                if (!data.isNull() && !themeCss.isEmpty()) {
+                    QString text = QString::fromUtf8(data);
+                    const int headEnd =
+                        text.indexOf(QLatin1String("</head>"), 0, Qt::CaseInsensitive);
+                    if (headEnd >= 0) {
+                        text.insert(headEnd,
+                                    QStringLiteral("<style id=\"__spindle_theme\">%1</style>")
+                                        .arg(themeCss));
+                        data = text.toUtf8();
+                    }
+                }
+            }
+            if (!data.isNull()) {
+                mime += "; charset=utf-8";
+                m_injected.insert(cacheKey, new QByteArray(data),
+                                  qMax(1, static_cast<int>(data.size())));
+            }
         }
     }
     if (data.isNull())

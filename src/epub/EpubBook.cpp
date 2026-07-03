@@ -103,6 +103,9 @@ bool EpubBook::open(const QString &filePath)
 {
     m_valid = false;
     m_error.clear();
+    m_chapters.clear();
+    m_toc.clear();
+    m_chapterIndexByPath.clear();
 
     if (!m_zip.open(filePath)) {
         m_error = QStringLiteral("EPUB ファイルを開けませんでした");
@@ -215,6 +218,11 @@ bool EpubBook::open(const QString &filePath)
             m_toc.append(TocItem{ch.label, ch.path, {}});
     }
 
+    for (int i = 0; i < m_chapters.size(); ++i) {
+        if (!m_chapterIndexByPath.contains(m_chapters[i].path))
+            m_chapterIndexByPath.insert(m_chapters[i].path, i);
+    }
+
     m_valid = true;
     return true;
 }
@@ -320,10 +328,5 @@ QString EpubBook::findTocLabel(const QVector<TocItem> &items, const QString &pat
 
 int EpubBook::chapterIndexForPath(const QString &path) const
 {
-    const QString clean = path_util::stripHash(path);
-    for (int i = 0; i < m_chapters.size(); ++i) {
-        if (m_chapters[i].path == clean)
-            return i;
-    }
-    return -1;
+    return m_chapterIndexByPath.value(path_util::stripHash(path), -1);
 }

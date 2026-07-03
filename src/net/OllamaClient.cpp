@@ -12,6 +12,11 @@
 
 namespace {
 
+// stream:false means Ollama sends nothing until generation completes, so the
+// whole generation must fit in this window. 5 minutes tolerates slow local
+// models while still surfacing a hung server instead of waiting forever.
+constexpr int kTransferTimeoutMs = 300'000;
+
 QString shortResponseForMessage(const QByteArray &bytes)
 {
     QString text = QString::fromUtf8(bytes).trimmed();
@@ -120,6 +125,7 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
 
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setTransferTimeout(kTransferTimeoutMs);
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this,
@@ -188,6 +194,7 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
 
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setTransferTimeout(kTransferTimeoutMs);
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply, url, requestId]() {

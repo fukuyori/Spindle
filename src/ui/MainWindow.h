@@ -6,6 +6,8 @@
 #include "model/Highlight.h"
 #include "model/TranslationCache.h"
 
+#include <QFuture>
+#include <QFutureWatcher>
 #include <QHash>
 #include <QMainWindow>
 #include <QPair>
@@ -27,7 +29,9 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QLabel;
 class QAction;
+class QProgressBar;
 class QStackedWidget;
+class QSplitter;
 class QTimer;
 class QWebEngineView;
 class QWebChannel;
@@ -110,18 +114,34 @@ private:
     void openRecentEpub(const QString &filePath);
     int recentChapterIndex(const QString &filePath) const;
     QString recentChapterLabel(const QString &filePath) const;
+    // Debounced: records the pending (path, index, label) and commits shortly
+    // after the last chapter change (QSettings hits the registry on Windows).
     void saveRecentChapter(const QString &filePath, int index, const QString &label);
+    void commitRecentChapter();
     void populateToc();
     void addTocItems(const QVector<TocItem> &items, QTreeWidgetItem *parent);
     void displayChapter(int index, const QString &fragment = QString());
     void applyZoom();
+    // Theme CSS is delivered two ways: a DocumentCreation user script (so a
+    // newly navigated chapter paints correctly on its very first frame — no
+    // flash of the book's own styles) and a live runJavaScript for the page
+    // currently on screen (settings changes apply without a reload).
     void injectViewStyle();
+    QString viewStyleCss() const;
+    void updateThemeScript(const QString &css);
     QColor themeBackground() const;
     void updateLocation();
     void updateNavButtons();
     void updateSidebarMode();
 
     void ensureChapterTexts();
+    void startChapterTextsBuild(); // kick off the background build after open
+    void adoptChapterTexts();      // take the finished future's result (once)
+
+    // Deferred web-view creation: the window shows immediately and Chromium
+    // (the bulk of cold-start time) initializes afterwards / on first use.
+    void ensureWebView();
+    void restoreViewSettings(); // QSettings restore split out of setupWebChannel
 
     // Web channel / highlights
     void setupWebChannel();
@@ -163,6 +183,15 @@ private:
     void showTranslatePopup(const QString &text);
     void showSummaryDialog(const QString &title, const QString &text);
 
+    // Translated-EPUB export: queue-driven async translation (2 requests in
+    // flight, no nested event loop; cancel keeps already-translated paragraphs).
+    void startTranslatedEpubExport(const QStringList &missing);
+    void exportTranslateNext();
+    void onExportTranslateFinished(int requestId, bool ok, const QString &result);
+    void cancelTranslatedEpubExport();
+    void closeExportDialog();
+    void finishTranslatedEpubExport(); // save-file dialog + zip write
+
     enum class Theme { Light, Sepia, Dark };
     enum class TranslateView { Original, Bilingual, Translation };
     enum class SummaryDetail { Brief, Standard, Detailed };
@@ -184,6 +213,11 @@ private:
 
     QVector<ChapterText> m_chapterTexts;
     bool m_chapterTextsReady = false;
+    // Background build of m_chapterTexts (started right after the book opens so
+    // the first search / summary / import doesn't stall parsing the whole book).
+    bool m_chapterTextsBuilding = false;
+    QFuture<QVector<ChapterText>> m_chapterTextsFuture;
+    QFutureWatcher<QVector<ChapterText>> *m_chapterTextsWatcher = nullptr;
     QVector<Highlight> m_highlights;
 
     QString m_pendingFragment;
@@ -191,12 +225,17 @@ private:
     QString m_pendingScrollId; // highlight id to scroll to after the page loads
 
     QString m_schemeId; // unique epub:// host for this window's book
-    QWebEngineView *m_view = nullptr;
+    QWebEngineView *m_view = nullptr; // created lazily — see ensureWebView()
+    QSplitter *m_splitter = nullptr;
+    QWidget *m_viewPlaceholder = nullptr; // holds the view's splitter slot until then
     QWebChannel *m_channel = nullptr;
     Bridge *m_bridge = nullptr;
     OllamaClient *m_ollama = nullptr;
     OllamaClient *m_selectionOllama = nullptr; // ad-hoc selection translation
     OllamaClient *m_summaryOllama = nullptr;   // ad-hoc selection/chapter summary
+    int m_selectionReqSeq = 0; // latest selection-translate request (stale replies dropped)
+    int m_summaryReqSeq = 0;   // latest summary/summary-translate request
+    bool m_summaryReqIsTranslate = false; // whether that request was 要約の翻訳
     QLabel *m_translatePopup = nullptr;
     QDialog *m_summaryDialog = nullptr;
     QTextEdit *m_summaryText = nullptr;
@@ -236,6 +275,29 @@ private:
     TranslationCache m_trCache;
     Glossary m_trGlossary;
     QTimer *m_trCacheSave = nullptr;
+
+    // Translated-EPUB export state (active while the progress dialog is up).
+    OllamaClient *m_exportOllama = nullptr;
+    QDialog *m_exportDialog = nullptr;
+    QProgressBar *m_exportBar = nullptr;
+    QStringList m_exportQueue;
+    QHash<int, QString> m_exportReqs; // requestId -> source paragraph
+    int m_exportCursor = 0;
+    int m_exportInFlight = 0;
+    int m_exportDone = 0;
+    int m_exportMode = 0; // 0 bilingual, 1 translation-only
+    bool m_exportActive = false;
+
+    // Freezes view repaints during chapter navigation (the previous chapter
+    // stays on screen until the new one has finished loading — no intermediate
+    // frames). The timer is a safety net that unfreezes if a load never ends.
+    QTimer *m_viewUnfreeze = nullptr;
+
+    // Debounced last-read-chapter persistence (see saveRecentChapter).
+    QTimer *m_recentSave = nullptr;
+    QString m_recentPendingPath;
+    int m_recentPendingIndex = -1;
+    QString m_recentPendingLabel;
     QTreeWidget *m_toc = nullptr;
     QMenu *m_recentEpubsMenu = nullptr;
     QListWidget *m_recentEpubsList = nullptr;

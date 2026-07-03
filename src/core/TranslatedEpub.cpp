@@ -29,18 +29,6 @@ QString tagOf(const QDomElement &el)
     return (ln.isEmpty() ? el.tagName() : ln).toLower();
 }
 
-bool hasBlockDescendant(const QDomElement &el)
-{
-    for (QDomNode n = el.firstChild(); !n.isNull(); n = n.nextSibling()) {
-        if (!n.isElement())
-            continue;
-        QDomElement c = n.toElement();
-        if (isBlockTag(tagOf(c)) || hasBlockDescendant(c))
-            return true;
-    }
-    return false;
-}
-
 void appendText(const QDomNode &node, QString &out)
 {
     for (QDomNode n = node.firstChild(); !n.isNull(); n = n.nextSibling()) {
@@ -52,24 +40,29 @@ void appendText(const QDomNode &node, QString &out)
 }
 
 // Leaf blocks: a block-level element with no nested block, ≥2 chars of text that
-// contains a letter or number. Matches reader.js collectLeafBlocks().
-void collectLeafBlocks(const QDomElement &root, QVector<QDomElement> &out)
+// contains a letter or number. Matches reader.js collectLeafBlocks(). Single
+// O(n) pass: the return value reports whether the subtree contains any block
+// element, so leaf-ness is decided without per-element descendant rescans.
+bool collectLeafBlocks(const QDomElement &root, QVector<QDomElement> &out)
 {
+    bool hasBlock = false;
     for (QDomNode n = root.firstChild(); !n.isNull(); n = n.nextSibling()) {
         if (!n.isElement())
             continue;
         QDomElement el = n.toElement();
-        if (isBlockTag(tagOf(el)) && !hasBlockDescendant(el)) {
+        const bool childHas = collectLeafBlocks(el, out);
+        const bool blk = isBlockTag(tagOf(el));
+        if (blk && !childHas) { // no block descendants -> subtree appended nothing
             QString text;
             appendText(el, text);
             const QString trimmed = text.trimmed();
             static const QRegularExpression alnum(QStringLiteral("[\\p{L}\\p{N}]"));
             if (trimmed.size() >= 2 && alnum.match(trimmed).hasMatch())
                 out.append(el);
-        } else {
-            collectLeafBlocks(el, out); // descend into containers
         }
+        hasBlock = hasBlock || blk || childHas;
     }
+    return hasBlock;
 }
 
 QDomDocument parse(const QString &xhtml)

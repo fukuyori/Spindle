@@ -16,7 +16,9 @@ namespace highlight_store {
 QString filePathFor(const QString &epubPath);
 
 QVector<Highlight> load(const QString &epubPath);
-void save(const QString &epubPath, const BookRef &book, const QVector<Highlight> &highlights);
+// Atomically writes the sidecar file. Returns false when the write failed
+// (callers should surface this — silent loss of highlights is not acceptable).
+bool save(const QString &epubPath, const BookRef &book, const QVector<Highlight> &highlights);
 
 // In-list mutation helpers mirroring highlights.ts.
 void upsert(QVector<Highlight> &list, const Highlight &highlight);
