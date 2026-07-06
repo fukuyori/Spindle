@@ -4,6 +4,39 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - 2026-07-06
+
+### Added
+- **Toolbar icons** — 開く・サイドバー・履歴・前/次の章・文字サイズ (A−/A+) are
+  now theme icons (monochrome symbolic set) instead of text buttons. Where the
+  icon theme lacks a glyph the buttons fall back to Qt's standard icons, or to
+  the original text for the zoom pair. AI / 原文 / 対訳 / 訳文 / XML stay text.
+
+### Changed
+- **Translations keep the original's formatting.** The in-app bilingual /
+  translation views and the bilingual EPUB export now clone the source block
+  (tag, classes, inline style) instead of inserting a plain paragraph, so
+  headings translate as headings and styled paragraphs keep their look. The
+  translation block also carries the target language's `lang` attribute.
+- **Bilingual spacing** — in 対訳 view a translation hugs its original
+  paragraph and a clear gap separates the pair from the next original
+  (logical margins, so vertical writing gets the same rhythm);
+  訳文のみ view keeps the book's own block spacing.
+
+### Fixed
+- **Brightness (and theme) changes now apply to the page being read.** A served
+  chapter embeds the theme CSS, and the pre-paint theme script could race the
+  parser and create a second `style#__spindle_theme`; live updates then edited
+  the losing duplicate, so 明るさ調整 sliders (and sometimes theme switches)
+  had no visible effect until the next chapter load. The style updater now
+  dedupes and re-appends the element so the latest CSS always wins.
+- **Ollama errors now show the server's own message** — e.g.
+  `model "qwen2.5" not found` instead of the bare HTTP status line
+  ("server replied: Not Found"), so a missing model is diagnosable
+  from the error popup.
+- **Startup warning about the desktop file name** — `setDesktopFileName` is
+  now passed `spindle` without the `.desktop` suffix, as Qt expects.
+
 ## [0.4.1] - 2026-07-06
 
 ### Added
@@ -23,12 +56,6 @@ and the project follows [Semantic Versioning](https://semver.org/).
   are missing.
 
 ### Fixed
-- **Brightness (and theme) changes now apply to the page being read.** A served
-  chapter embeds the theme CSS, and the pre-paint theme script could race the
-  parser and create a second `style#__spindle_theme`; live updates then edited
-  the losing duplicate, so 明るさ調整 sliders (and sometimes theme switches)
-  had no visible effect until the next chapter load. The style updater now
-  dedupes and re-appends the element so the latest CSS always wins.
 - **`package-linux.sh` no longer deletes position plugins from the Qt kit
   itself** — with a system Qt this failed with permission errors (and with
   root privileges would have damaged the system Qt install), aborting the
@@ -374,6 +401,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.4.2]: https://github.com/fukuyori/Spindle/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/fukuyori/Spindle/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fukuyori/Spindle/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/fukuyori/Spindle/compare/v0.3.4...v0.3.5

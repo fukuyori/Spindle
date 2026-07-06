@@ -28,6 +28,16 @@ QString shortResponseForMessage(const QByteArray &bytes)
     return text;
 }
 
+// Ollama pairs error HTTP statuses with a {"error":"..."} body whose text is
+// far more actionable than Qt's status-line message (e.g. `model "x" not
+// found` instead of "server replied: Not Found") — surface it when present.
+QString ollamaErrorDetail(const QByteArray &bytes, QNetworkReply *reply)
+{
+    const QString detail =
+        QJsonDocument::fromJson(bytes).object().value(QStringLiteral("error")).toString();
+    return detail.isEmpty() ? reply->errorString() : detail;
+}
+
 QString extractOllamaContent(const QByteArray &bytes, const QString &emptyMessage, bool *ok)
 {
     *ok = false;
@@ -135,7 +145,7 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
         if (reply->error() != QNetworkReply::NoError) {
             emit finished(requestId, false,
                           QStringLiteral("Ollama への接続に失敗しました (%1): %2")
-                              .arg(url.toString(), reply->errorString()));
+                              .arg(url.toString(), ollamaErrorDetail(bytes, reply)));
             return;
         }
         bool ok = false;
@@ -203,7 +213,7 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
         if (reply->error() != QNetworkReply::NoError) {
             emit finished(requestId, false,
                           QStringLiteral("Ollama への接続に失敗しました (%1): %2")
-                              .arg(url.toString(), reply->errorString()));
+                              .arg(url.toString(), ollamaErrorDetail(bytes, reply)));
             return;
         }
         bool ok = false;
