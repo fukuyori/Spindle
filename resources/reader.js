@@ -292,6 +292,14 @@
     }
     s.textContent =
       ".spindle-translation{opacity:0.85;}" +
+      // Bilingual rhythm: the translation hugs its original (small start
+      // margin, original's end margin shrunk to match) and a clear gap
+      // separates the pair from the next original. Logical properties so
+      // vertical writing modes get the same spacing. Scoped to sv-bilingual —
+      // translation-only view keeps the book's own block spacing.
+      "body.sv-bilingual .spindle-translation{" +
+      "margin-block-start:0.3em !important;margin-block-end:1.1em !important;}" +
+      "body.sv-bilingual .spindle-source{margin-block-end:0.3em !important;}" +
       "body.sv-original .spindle-translation{display:none;}" +
       "body.sv-translation .spindle-source{display:none;}";
   }
@@ -327,8 +335,17 @@
     var block = blocks[index];
     var node = block.nextElementSibling;
     if (!node || !node.classList.contains("spindle-translation")) {
-      node = document.createElement("p");
-      node.className = "spindle-translation";
+      // Clone the source block (tag + attributes, no children) so the
+      // translation keeps its formatting — headings render as headings,
+      // styled paragraphs keep their classes/inline CSS.
+      node = block.cloneNode(false);
+      node.removeAttribute("id");
+      node.removeAttribute("data-spindle-block"); // must not look like a source block
+      node.classList.remove("spindle-source");
+      node.classList.add("spindle-translation");
+      if (currentLang) node.setAttribute("lang", currentLang);
+      if (node.tagName === "LI")
+        node.style.display = "block"; // avoid a second marker / renumbering
       block.insertAdjacentElement("afterend", node);
     }
     node.textContent = text;

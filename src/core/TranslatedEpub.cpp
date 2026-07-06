@@ -126,10 +126,34 @@ QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCa
             while (!block.firstChild().isNull())
                 block.removeChild(block.firstChild());
             block.appendChild(doc.createTextNode(tr));
-        } else { // Bilingual: insert a translation paragraph after the block
-            QDomElement p = doc.createElement(QStringLiteral("p"));
-            p.setAttribute(QStringLiteral("class"), QStringLiteral("spindle-translation"));
-            p.setAttribute(QStringLiteral("style"), QStringLiteral("opacity:0.85;"));
+        } else { // Bilingual: insert a translation block after the original,
+                 // cloning its tag/attributes so the translation keeps the
+                 // original's formatting (headings, classes, inline styles).
+            QDomElement p = block.cloneNode(false).toElement();
+            p.removeAttribute(QStringLiteral("id"));
+            const QString cls = p.attribute(QStringLiteral("class"));
+            p.setAttribute(QStringLiteral("class"),
+                           cls.isEmpty() ? QStringLiteral("spindle-translation")
+                                         : cls + QStringLiteral(" spindle-translation"));
+            QString style = p.attribute(QStringLiteral("style"));
+            if (!style.isEmpty() && !style.endsWith(QLatin1Char(';')))
+                style += QLatin1Char(';');
+            // Same bilingual rhythm as the in-app view: hug the original,
+            // clear gap before the next original.
+            style += QStringLiteral(
+                "opacity:0.85;margin-block-start:0.3em;margin-block-end:1.1em;");
+            if (block.tagName().compare(QStringLiteral("li"), Qt::CaseInsensitive) == 0)
+                style += QStringLiteral("display:block;"); // no second marker / renumbering
+            p.setAttribute(QStringLiteral("style"), style);
+            QString blockStyle = block.attribute(QStringLiteral("style"));
+            if (!blockStyle.isEmpty() && !blockStyle.endsWith(QLatin1Char(';')))
+                blockStyle += QLatin1Char(';');
+            block.setAttribute(QStringLiteral("style"),
+                               blockStyle + QStringLiteral("margin-block-end:0.3em;"));
+            if (!cache.lang().isEmpty()) {
+                p.setAttribute(QStringLiteral("xml:lang"), cache.lang());
+                p.setAttribute(QStringLiteral("lang"), cache.lang());
+            }
             p.appendChild(doc.createTextNode(tr));
             QDomNode parent = block.parentNode();
             if (!parent.isNull())

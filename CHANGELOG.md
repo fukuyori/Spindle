@@ -4,6 +4,41 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-07-06
+
+### Added
+- **Toolbar translation-view switcher** — 原文 / 対訳 / 訳文 buttons on the
+  toolbar switch the view (and kick off translation) without opening the
+  translate dialog. When the book is already in the target language the
+  buttons lock to 原文, with a tooltip explaining why.
+
+### Changed
+- **Theme and font moved into the 表示 menu** — the theme is now picked
+  directly (ライト / セピア / ダーク radio entries) instead of a cycling toolbar
+  button, and the body font is chosen via the native font dialog
+  (表示 > フォント…) with a separate 「フォントを本文に適用」 toggle. The
+  toolbar keeps A− / A+ / XML.
+- **README build instructions** now give the exact Ubuntu/Debian package list,
+  and `build.sh` prints an install hint when Qt6 WebEngine development files
+  are missing.
+
+### Fixed
+- **Brightness (and theme) changes now apply to the page being read.** A served
+  chapter embeds the theme CSS, and the pre-paint theme script could race the
+  parser and create a second `style#__spindle_theme`; live updates then edited
+  the losing duplicate, so 明るさ調整 sliders (and sometimes theme switches)
+  had no visible effect until the next chapter load. The style updater now
+  dedupes and re-appends the element so the latest CSS always wins.
+- **`package-linux.sh` no longer deletes position plugins from the Qt kit
+  itself** — with a system Qt this failed with permission errors (and with
+  root privileges would have damaged the system Qt install), aborting the
+  AppImage build. The plugins are now hidden from linuxdeploy via a filtered
+  symlink copy of the plugins dir handed over through a `$QMAKE` wrapper.
+- **Linux desktop integration** — the window icon is set at runtime, the
+  desktop file name is registered (fixes taskbar icon association on
+  Wayland), a 256×256 icon is installed, and the .deb refreshes the icon
+  cache and desktop database on install/removal.
+
 ## [0.4.0] - 2026-07-04
 
 ### Added
@@ -339,6 +374,8 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.4.1]: https://github.com/fukuyori/Spindle/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/fukuyori/Spindle/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/fukuyori/Spindle/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/fukuyori/Spindle/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/fukuyori/Spindle/compare/v0.3.2...v0.3.3

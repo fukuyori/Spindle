@@ -18,7 +18,6 @@
 
 class EpubBook;
 class EpubSchemeHandler;
-class QFontComboBox;
 class QDialog;
 class QLineEdit;
 class QListWidget;
@@ -71,7 +70,8 @@ private slots:
     void previousChapter();
     void increaseFont();
     void decreaseFont();
-    void cycleTheme();
+    void setTheme(int theme); // Theme index: 0 light, 1 sepia, 2 dark
+    void chooseFont();        // pick the body font (applies it too)
     void toggleXmlView(bool on);
     void onSearchTextChanged();
     void runSearch();
@@ -162,6 +162,9 @@ private:
 
     // Translation
     void setTranslateView(int view); // 0 original, 1 bilingual, 2 translation
+    // Reflect m_translateView (and the book-language lock) onto the toolbar
+    // 原文/対訳/訳文 buttons.
+    void syncTranslateViewUi();
     void translateNext(int run);
     QString translateViewString() const;
     // True when the book's own language matches `targetCode` (primary subtag),
@@ -210,6 +213,7 @@ private:
     BrightnessAdjust m_brightness[3];
     bool m_xmlView = false; // show raw chapter source instead of rendered view
     QString m_fontFamily;   // body font override ("" = use the book's own fonts)
+    QString m_fontChoice;   // last font picked in 表示 > フォント… (persisted)
 
     QVector<ChapterText> m_chapterTexts;
     bool m_chapterTextsReady = false;
@@ -310,13 +314,16 @@ private:
     QPushButton *m_tabHighlights = nullptr;
     QPushButton *m_tabRecent = nullptr;
     QLineEdit *m_searchInput = nullptr;
-    QFontComboBox *m_fontCombo = nullptr;
     QAction *m_fontOverride = nullptr;
+    // 表示 > テーマ radio actions (indexes follow Theme).
+    QAction *m_themeActs[3] = {nullptr, nullptr, nullptr};
     QLabel *m_titleLabel = nullptr;
     QLabel *m_authorLabel = nullptr;
     QLabel *m_location = nullptr;
     QAction *m_prevAction = nullptr;
     QAction *m_nextAction = nullptr;
+    // Toolbar translation-view switcher (indexes follow TranslateView).
+    QAction *m_viewModeActs[3] = {nullptr, nullptr, nullptr};
     QTimer *m_searchDebounce = nullptr;
     int m_sidebarTab = 0;
 };

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.4.0 LANGUAGES C CXX)
+project(Spindle VERSION 0.4.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -138,6 +138,8 @@ if(UNIX AND NOT APPLE)
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
   install(FILES resources/spindle.svg
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps)
+  install(FILES resources/spindle.png
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps)
 endif()
 
 set(CPACK_PACKAGE_NAME "Spindle")
@@ -162,6 +164,8 @@ else()
   set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Spindle")
   set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+  set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+      "${CMAKE_CURRENT_SOURCE_DIR}/packaging/debian/postinst;${CMAKE_CURRENT_SOURCE_DIR}/packaging/debian/postrm")
   set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Native EPUB reader with highlights, search and local AI translation")
 endif()
 

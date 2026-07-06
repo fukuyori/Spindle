@@ -24,6 +24,16 @@ echo "==> Configuring (type=$BUILD_TYPE, prefix=${prefix:-<system>})"
 args=(-S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE")
 [ -n "$prefix" ] && args+=(-DCMAKE_PREFIX_PATH="$prefix")
 
+if [ "$(uname)" = "Linux" ] \
+    && ! pkg-config --exists Qt6WebEngineWidgets 2>/dev/null \
+    && ! find /usr/lib /usr/lib64 /usr/local/lib -path '*Qt6WebEngineWidgetsConfig.cmake' -print -quit 2>/dev/null | grep -q .; then
+  cat <<'EOF'
+   (Qt6 WebEngineWidgets development files were not found.)
+   On Ubuntu/Debian, install them with:
+     sudo apt-get install qt6-webengine-dev
+EOF
+fi
+
 cache="$BUILD_DIR/CMakeCache.txt"
 if [ -f "$cache" ]; then
   cache_root="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache" | tail -n 1)"

@@ -65,7 +65,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QColorDialog>
-#include <QFontComboBox>
+#include <QFontDialog>
 #include <QSettings>
 #include <QShowEvent>
 #include <QSplitter>
@@ -75,6 +75,7 @@
 #include <QStringList>
 #include <QSlider>
 #include <QTimer>
+#include <QStyle>
 #include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -407,6 +408,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     ++g_windowCount;
 
     setWindowTitle(QStringLiteral("Spindle"));
+    setWindowIcon(QIcon(QStringLiteral(":/spindle.png")));
     resize(1180, 800);
     setAcceptDrops(true);
 
@@ -649,7 +651,24 @@ void MainWindow::buildUi()
                            &MainWindow::exportChapterAozora);
 
     QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("表示"));
+    QMenu *themeMenu = viewMenu->addMenu(QStringLiteral("テーマ"));
+    QActionGroup *themeGroup = new QActionGroup(this);
+    themeGroup->setExclusive(true);
+    for (int i = 0; i < 3; ++i) {
+        QAction *act = themeMenu->addAction(themeLabelForIndex(i));
+        act->setCheckable(true);
+        themeGroup->addAction(act);
+        connect(act, &QAction::triggered, this, [this, i] { setTheme(i); });
+        m_themeActs[i] = act;
+    }
     viewMenu->addAction(QStringLiteral("明るさ調整…"), this, &MainWindow::openAppearanceDialog);
+    viewMenu->addSeparator();
+    viewMenu->addAction(QStringLiteral("フォント…"), this, &MainWindow::chooseFont);
+    m_fontOverride = viewMenu->addAction(QStringLiteral("フォントを本文に適用"));
+    m_fontOverride->setCheckable(true);
+    m_fontOverride->setToolTip(
+        QStringLiteral("選択したフォントを本文に適用（オフで本のフォントに戻す）"));
+    connect(m_fontOverride, &QAction::toggled, this, [this] { applyFontChoice(); });
 
     QMenu *trMenu = menuBar()->addMenu(QStringLiteral("翻訳"));
     trMenu->addAction(QStringLiteral("設定…"), this, &MainWindow::openTranslateDialog);
@@ -696,12 +715,26 @@ void MainWindow::buildUi()
     toolbar->setAllowedAreas(Qt::TopToolBarArea);
     toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
 
-    QAction *openToolbarAction = toolbar->addAction(QStringLiteral("開く"));
+    // The toolbar is text-only; the leftmost three actions carry icons instead,
+    // so they get an explicit icon-only button style below.
+    auto iconOnly = [toolbar](QAction *act) {
+        if (QToolButton *btn = qobject_cast<QToolButton *>(toolbar->widgetForAction(act)))
+            btn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    };
+    auto themeIcon = [this](const char *name, QStyle::StandardPixmap fallback) {
+        return QIcon::fromTheme(QLatin1String(name), style()->standardIcon(fallback));
+    };
+
+    QAction *openToolbarAction = toolbar->addAction(
+        themeIcon("document-open-symbolic", QStyle::SP_DialogOpenButton), QStringLiteral("開く"));
     openToolbarAction->setToolTip(QStringLiteral("EPUB を開く"));
     connect(openToolbarAction, &QAction::triggered, this, &MainWindow::onOpenTriggered);
+    iconOnly(openToolbarAction);
     toolbar->addSeparator();
 
-    m_sidebarAction = toolbar->addAction(QStringLiteral("サイドバー"));
+    m_sidebarAction = toolbar->addAction(
+        themeIcon("sidebar-show-symbolic", QStyle::SP_FileDialogListView),
+        QStringLiteral("サイドバー"));
     m_sidebarAction->setCheckable(true);
     m_sidebarAction->setChecked(true);
     m_sidebarAction->setToolTip(QStringLiteral("左ペインの表示/非表示"));
@@ -710,16 +743,24 @@ void MainWindow::buildUi()
                 if (m_sidebar)
                     m_sidebar->setVisible(on);
             });
-    QAction *recentToolbarAction = toolbar->addAction(QStringLiteral("履歴"));
+    iconOnly(m_sidebarAction);
+    QAction *recentToolbarAction = toolbar->addAction(
+        themeIcon("document-open-recent-symbolic", QStyle::SP_FileDialogContentsView),
+        QStringLiteral("履歴"));
     recentToolbarAction->setToolTip(QStringLiteral("最近開いた EPUB を左ペインに表示"));
     connect(recentToolbarAction, &QAction::triggered, this, &MainWindow::showRecentEpubsPane);
+    iconOnly(recentToolbarAction);
     toolbar->addSeparator();
-    m_prevAction = toolbar->addAction(QStringLiteral("←"));
+    m_prevAction = toolbar->addAction(themeIcon("go-previous-symbolic", QStyle::SP_ArrowBack),
+                                      QStringLiteral("前の章"));
     m_prevAction->setToolTip(QStringLiteral("前の章"));
-    m_nextAction = toolbar->addAction(QStringLiteral("→"));
+    m_nextAction = toolbar->addAction(themeIcon("go-next-symbolic", QStyle::SP_ArrowForward),
+                                      QStringLiteral("次の章"));
     m_nextAction->setToolTip(QStringLiteral("次の章"));
     connect(m_prevAction, &QAction::triggered, this, &MainWindow::previousChapter);
     connect(m_nextAction, &QAction::triggered, this, &MainWindow::nextChapter);
+    iconOnly(m_prevAction);
+    iconOnly(m_nextAction);
     toolbar->addSeparator();
     QToolButton *aiButton = new QToolButton(toolbar);
     aiButton->setText(QStringLiteral("AI"));
@@ -732,26 +773,44 @@ void MainWindow::buildUi()
     aiButton->setMenu(aiMenu);
     toolbar->addWidget(aiButton);
     toolbar->addSeparator();
-    toolbar->addAction(QStringLiteral("A−"), this, &MainWindow::decreaseFont);
-    toolbar->addAction(QStringLiteral("A+"), this, &MainWindow::increaseFont);
-    toolbar->addAction(QStringLiteral("テーマ"), this, &MainWindow::cycleTheme);
+
+    // Translation-view switcher: mirrors the 表示モード combo in the 翻訳設定
+    // dialog. Selecting 対訳/訳文 kicks off (cached or Ollama) translation of the
+    // current chapter via the same setTranslateView path.
+    QActionGroup *viewModeGroup = new QActionGroup(this);
+    viewModeGroup->setExclusive(true);
+    const QString viewModeLabels[3] = {QStringLiteral("原文"), QStringLiteral("対訳"),
+                                       QStringLiteral("訳文")};
+    for (int i = 0; i < 3; ++i) {
+        QAction *act = toolbar->addAction(viewModeLabels[i]);
+        act->setCheckable(true);
+        viewModeGroup->addAction(act);
+        connect(act, &QAction::triggered, this, [this, i] { setTranslateView(i); });
+        m_viewModeActs[i] = act;
+    }
+    toolbar->addSeparator();
+    QAction *fontMinus = toolbar->addAction(QStringLiteral("A−"), this,
+                                            &MainWindow::decreaseFont);
+    fontMinus->setToolTip(QStringLiteral("文字を小さく"));
+    QAction *fontPlus = toolbar->addAction(QStringLiteral("A+"), this,
+                                           &MainWindow::increaseFont);
+    fontPlus->setToolTip(QStringLiteral("文字を大きく"));
+    // No QStyle fallback exists for zoom, so keep the A−/A+ text where the
+    // icon theme has no zoom glyphs (e.g. stock Windows/macOS).
+    const QIcon zoomOut = QIcon::fromTheme(QStringLiteral("zoom-out-symbolic"),
+                                           QIcon::fromTheme(QStringLiteral("zoom-out")));
+    const QIcon zoomIn = QIcon::fromTheme(QStringLiteral("zoom-in-symbolic"),
+                                          QIcon::fromTheme(QStringLiteral("zoom-in")));
+    if (!zoomOut.isNull() && !zoomIn.isNull()) {
+        fontMinus->setIcon(zoomOut);
+        fontPlus->setIcon(zoomIn);
+        iconOnly(fontMinus);
+        iconOnly(fontPlus);
+    }
     QAction *xmlAction = toolbar->addAction(QStringLiteral("XML"));
     xmlAction->setCheckable(true);
     xmlAction->setToolTip(QStringLiteral("章の XHTML ソースを表示"));
     connect(xmlAction, &QAction::toggled, this, &MainWindow::toggleXmlView);
-
-    toolbar->addSeparator();
-    m_fontCombo = new QFontComboBox(this);
-    m_fontCombo->setMaximumWidth(170);
-    m_fontCombo->setToolTip(QStringLiteral("本文フォント（「適用」で本のフォントを上書き）"));
-    toolbar->addWidget(m_fontCombo);
-    m_fontOverride = toolbar->addAction(QStringLiteral("適用"));
-    m_fontOverride->setCheckable(true);
-    m_fontOverride->setToolTip(
-        QStringLiteral("選択したフォントを本文に適用（オフで本のフォントに戻す）"));
-    connect(m_fontCombo, &QFontComboBox::currentFontChanged, this,
-            [this] { applyFontChoice(); });
-    connect(m_fontOverride, &QAction::toggled, this, [this] { applyFontChoice(); });
 
     m_location = new QLabel(QStringLiteral("No book loaded"), this);
     statusBar()->addWidget(m_location);
@@ -860,6 +919,7 @@ void MainWindow::buildUi()
     setCentralWidget(m_splitter);
 
     restoreViewSettings();
+    syncTranslateViewUi();
 }
 
 void MainWindow::ensureWebView()
@@ -970,6 +1030,8 @@ void MainWindow::restoreViewSettings()
     // Restore the theme and translation view used last time.
     m_theme = static_cast<Theme>(
         qBound(0, settings.value(QStringLiteral("view/theme"), 0).toInt(), 2));
+    if (m_themeActs[static_cast<int>(m_theme)])
+        m_themeActs[static_cast<int>(m_theme)]->setChecked(true);
     for (int i = 0; i < 3; ++i) {
         const QString prefix = QStringLiteral("appearance/%1/").arg(themeKeyForIndex(i));
         m_brightness[i].background =
@@ -988,16 +1050,12 @@ void MainWindow::restoreViewSettings()
     // Restore the font choice without firing the change handlers (which would
     // persist defaults). injectViewStyle runs on each chapter load.
     const bool fontOn = settings.value(QStringLiteral("font/override"), false).toBool();
-    const QString fontFamily = settings.value(QStringLiteral("font/family")).toString();
-    if (m_fontCombo && !fontFamily.isEmpty()) {
-        QSignalBlocker block(m_fontCombo);
-        m_fontCombo->setCurrentFont(QFont(fontFamily));
-    }
+    m_fontChoice = settings.value(QStringLiteral("font/family")).toString();
     if (m_fontOverride) {
         QSignalBlocker block(m_fontOverride);
-        m_fontOverride->setChecked(fontOn);
+        m_fontOverride->setChecked(fontOn && !m_fontChoice.isEmpty());
     }
-    m_fontFamily = (fontOn && m_fontCombo) ? m_fontCombo->currentFont().family() : QString();
+    m_fontFamily = fontOn ? m_fontChoice : QString();
 }
 
 // --- file opening ----------------------------------------------------------
@@ -1209,6 +1267,7 @@ bool MainWindow::openEpub(const QString &filePath)
 
     populateToc();
     renderHighlightsList();
+    syncTranslateViewUi(); // book language is known now — enable/lock the buttons
     const int savedChapter = qBound(0, recentChapterIndex(filePath),
                                     qMax(0, m_book->chapters().size() - 1));
     displayChapter(savedChapter);
@@ -1387,10 +1446,19 @@ QString MainWindow::viewStyleCss() const
 // unlike readystatechange, which can arrive after the first render).
 static QString themeStyleJs(const QString &css)
 {
+    // Served documents embed a <style id="__spindle_theme"> in <head>, and this
+    // script may have created a second one before <head> was parsed. All the
+    // rules carry !important, so the LAST style element in tree order wins:
+    // dedupe and (re)append, otherwise a stale duplicate keeps overriding
+    // live theme/brightness changes.
     return QStringLiteral(
-               "(function(){function apply(){var s=document.getElementById('__spindle_theme');"
-               "if(!s){s=document.createElement('style');s.id='__spindle_theme';"
-               "(document.documentElement||document.head).appendChild(s);}s.textContent=`%1`;}"
+               "(function(){function apply(){"
+               "var els=document.querySelectorAll('style#__spindle_theme');"
+               "var s=els.length?els[els.length-1]:null;"
+               "for(var i=0;i<els.length-1;i++)els[i].parentNode.removeChild(els[i]);"
+               "if(!s){s=document.createElement('style');s.id='__spindle_theme';}"
+               "s.textContent=`%1`;"
+               "(document.documentElement||document.head).appendChild(s);}"
                "if(document.documentElement){apply();}"
                "else{new MutationObserver(function(m,o){if(document.documentElement){"
                "o.disconnect();apply();}}).observe(document,{childList:true});}})();")
@@ -1480,12 +1548,12 @@ QString MainWindow::translationColor() const
 void MainWindow::applyFontChoice()
 {
     const bool on = m_fontOverride && m_fontOverride->isChecked();
-    m_fontFamily = (on && m_fontCombo) ? m_fontCombo->currentFont().family() : QString();
+    m_fontFamily = on ? m_fontChoice : QString();
 
     QSettings settings;
     settings.setValue(QStringLiteral("font/override"), on);
-    if (m_fontCombo)
-        settings.setValue(QStringLiteral("font/family"), m_fontCombo->currentFont().family());
+    if (!m_fontChoice.isEmpty())
+        settings.setValue(QStringLiteral("font/family"), m_fontChoice);
 
     injectViewStyle();
 }
@@ -1527,13 +1595,31 @@ void MainWindow::previousChapter()
 
 void MainWindow::increaseFont() { m_fontSize = qMin(m_fontSize + 10, 200); applyZoom(); }
 void MainWindow::decreaseFont() { m_fontSize = qMax(m_fontSize - 10, 50); applyZoom(); }
-void MainWindow::cycleTheme()
+void MainWindow::setTheme(int theme)
 {
-    m_theme = static_cast<Theme>((static_cast<int>(m_theme) + 1) % 3);
+    m_theme = static_cast<Theme>(qBound(0, theme, 2));
+    if (m_themeActs[static_cast<int>(m_theme)])
+        m_themeActs[static_cast<int>(m_theme)]->setChecked(true);
     QSettings().setValue(QStringLiteral("view/theme"), static_cast<int>(m_theme));
     if (m_view)
         m_view->page()->setBackgroundColor(themeBackground());
     injectViewStyle();
+}
+
+void MainWindow::chooseFont()
+{
+    bool ok = false;
+    const QFont initial = m_fontChoice.isEmpty() ? font() : QFont(m_fontChoice);
+    const QFont picked =
+        QFontDialog::getFont(&ok, initial, this, QStringLiteral("本文フォント"));
+    if (!ok)
+        return;
+    m_fontChoice = picked.family();
+    // Picking a font implies wanting it applied; toggling fires applyFontChoice.
+    if (m_fontOverride && !m_fontOverride->isChecked())
+        m_fontOverride->setChecked(true);
+    else
+        applyFontChoice();
 }
 
 void MainWindow::toggleXmlView(bool on)
@@ -2272,6 +2358,30 @@ void MainWindow::setTranslateView(int view)
         m_bridge->setTranslateView(translateViewString());
         m_bridge->notifyTranslateViewChanged();
     }
+    syncTranslateViewUi();
+}
+
+void MainWindow::syncTranslateViewUi()
+{
+    if (!m_viewModeActs[0])
+        return;
+    // Same rule as the 翻訳設定 dialog: when the book is already in the target
+    // language, translation is a no-op — lock the buttons to 原文.
+    const bool sameLang = isBookLanguage(m_trTarget);
+    const bool enabled = m_book && !sameLang;
+    const int current = sameLang ? 0 : static_cast<int>(m_translateView);
+    const QString tips[3] = {
+        QStringLiteral("原文のみ表示"),
+        QStringLiteral("原文と訳文を対訳表示（Ollama で翻訳）"),
+        QStringLiteral("訳文のみ表示（Ollama で翻訳）"),
+    };
+    for (int i = 0; i < 3; ++i) {
+        m_viewModeActs[i]->setEnabled(enabled);
+        m_viewModeActs[i]->setChecked(i == current);
+        m_viewModeActs[i]->setToolTip(
+            sameLang ? QStringLiteral("本の言語と翻訳先が同じため、原文表示のみです")
+                     : tips[i]);
+    }
 }
 
 void MainWindow::onBlocksReady(const QString &json)
@@ -2865,6 +2975,7 @@ void MainWindow::openTranslateDialog()
         if (m_translateView == TranslateView::Original && !isBookLanguage(m_trTarget))
             m_translateView = TranslateView::Bilingual;
         settings.setValue(QStringLiteral("translate/view"), static_cast<int>(m_translateView));
+        syncTranslateViewUi(); // target/mode may have changed
         m_trForce = true; // 再翻訳: redo the translation rather than reusing the cache
         if (m_currentChapter >= 0)
             displayChapter(m_currentChapter); // reload clean, then re-translate

@@ -181,7 +181,8 @@ open build/spindle.app          # or: ./build/spindle.app/Contents/MacOS/spindle
 ### Linux
 
 ```sh
-# Install qt6-base / qt6-xml / qt6-webengine via your distro, then:
+# Ubuntu / Debian:
+sudo apt-get install cmake g++ qt6-base-dev qt6-webengine-dev
 cmake -S . -B build
 cmake --build build
 ./build/spindle

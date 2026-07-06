@@ -47,6 +47,9 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("Spindle"));
     app.setApplicationVersion(QStringLiteral(SPINDLE_VERSION));
     app.setWindowIcon(QIcon(QStringLiteral(":/spindle.png")));
+#if defined(Q_OS_LINUX)
+    app.setDesktopFileName(QStringLiteral("spindle"));
+#endif
 
     // The epub:// handler is installed on the default profile lazily, by the
     // first MainWindow that creates its web view (see ensureWebView). Touching

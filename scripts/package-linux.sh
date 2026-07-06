@@ -66,20 +66,43 @@ export QML_SOURCES_PATHS="$ROOT"
 
 # An EPUB reader needs no geolocation. Qt WebEngine drags in QtPositioning, whose
 # position plugins (notably NMEA) link Qt SerialPort, which we don't ship — that
-# breaks linuxdeploy. Drop the position plugins from the kit before deploying;
-# libQt6Positioning itself is still bundled as a WebEngine dependency.
-qt_plugins="$(qmake -query QT_INSTALL_PLUGINS 2>/dev/null || qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+# can break linuxdeploy and bloats the AppImage. Never modify the Qt kit itself
+# (it may be the system Qt under /usr): instead build a symlink copy of the
+# plugins dir without `position/` and hand it to linuxdeploy-plugin-qt through
+# a qmake wrapper ($QMAKE) that rewrites QT_INSTALL_PLUGINS.
+qmake_bin="$(command -v "${QMAKE:-qmake}" || command -v qmake6 || true)"
+qt_plugins="$([ -n "$qmake_bin" ] && "$qmake_bin" -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
 [ -z "$qt_plugins" ] && [ -n "$prefix" ] && qt_plugins="$prefix/plugins"
-if [ -n "$qt_plugins" ] && [ -d "$qt_plugins/position" ]; then
-  echo "==> Removing position plugins (no geolocation needed): $qt_plugins/position"
-  rm -rf "$qt_plugins/position"
+if [ -n "$qmake_bin" ] && [ -d "$qt_plugins/position" ]; then
+  echo "==> Hiding position plugins from the deploy (no geolocation needed)"
+  shadow="$BUILD_DIR/qt-plugins-noposition"
+  rm -rf "$shadow"
+  mkdir -p "$shadow"
+  cp -rs "$qt_plugins/." "$shadow/"
+  rm -rf "$shadow/position"
+  wrapper="$BUILD_DIR/qmake-noposition"
+  cat > "$wrapper" <<WRAP
+#!/usr/bin/env bash
+# qmake wrapper: report the filtered plugins dir, defer everything else.
+if [ "\${1:-}" = "-query" ]; then
+  if [ \$# -ge 2 ]; then
+    if [ "\$2" = "QT_INSTALL_PLUGINS" ]; then echo "$shadow"; else exec "$qmake_bin" "\$@"; fi
+  else
+    "$qmake_bin" -query | sed "s|^QT_INSTALL_PLUGINS:.*|QT_INSTALL_PLUGINS:$shadow|"
+  fi
+else
+  exec "$qmake_bin" "\$@"
+fi
+WRAP
+  chmod +x "$wrapper"
+  export QMAKE="$wrapper"
 fi
 
 echo "==> Building AppImage"
 ( cd "$DIST_DIR" && OUTPUT="Spindle-$VERSION-x86_64.AppImage" \
     "$LD" --appdir "$APPDIR" --plugin qt \
       --desktop-file "$APPDIR/usr/share/applications/spindle.desktop" \
-      --icon-file "$APPDIR/usr/share/icons/hicolor/scalable/apps/spindle.svg" \
+      --icon-file "$APPDIR/usr/share/icons/hicolor/256x256/apps/spindle.png" \
       --output appimage )
 
 echo "==> Done. Packages in: $DIST_DIR"

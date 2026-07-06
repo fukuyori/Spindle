@@ -167,7 +167,8 @@ open build/spindle.app          # または ./build/spindle.app/Contents/MacOS/s
 ### Linux
 
 ```sh
-# ディストリの qt6-base / qt6-xml / qt6-webengine を入れてから:
+# Ubuntu / Debian:
+sudo apt-get install cmake g++ qt6-base-dev qt6-webengine-dev
 cmake -S . -B build
 cmake --build build
 ./build/spindle
