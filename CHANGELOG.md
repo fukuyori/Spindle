@@ -4,6 +4,24 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] - 2026-07-07
+
+### Fixed
+- **Right-click "Copy image" / "Save image" in the reading pane now works.**
+  Chromium's own copy/download machinery never completed for images served
+  over the app's custom `epub://` scheme, so both menu entries silently did
+  nothing. Image right-clicks now show a dedicated 画像をコピー /
+  名前を付けて画像を保存... menu that reads the image straight from the EPUB's
+  own bytes instead.
+
+### Changed
+- **`package-windows.ps1` / `package-windows-inno.ps1` no longer build.**
+  They previously re-ran `build.ps1` every time, which could relink
+  `spindle.exe` and silently wipe out a code signature applied to the build
+  output beforehand. Both scripts now only stage and archive whatever already
+  exists under `build\` (erroring out if it's missing), so run `build.ps1` —
+  and sign the exe, if you sign releases — first.
+
 ## [0.4.2] - 2026-07-06
 
 ### Added

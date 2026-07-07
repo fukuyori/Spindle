@@ -28,6 +28,7 @@
 #include <QChildEvent>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QContextMenuEvent>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QDragEnterEvent>
@@ -39,6 +40,7 @@
 #include <QHBoxLayout>
 #include <QHash>
 #include <QIcon>
+#include <QImage>
 #include <QTextEdit>
 #include <QTextCursor>
 #include <QKeyEvent>
@@ -60,6 +62,7 @@
 #include <QProgressBar>
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrent>
+#include <functional>
 #include <iterator>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -82,6 +85,8 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QWebChannel>
+#include <QWebEngineContextMenuRequest>
+#include <QWebEngineDownloadRequest>
 #include <QWebEngineNewWindowRequest>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
@@ -121,6 +126,29 @@ protected:
 
 private:
     QString m_schemeId;
+};
+
+// Chromium's default "Copy image"/"Save image" fail for our custom epub://
+// scheme (the pixel/byte readback Chromium relies on for those actions never
+// completes for a non-standard scheme handler). Route image right-clicks to
+// the callback instead, which serves them straight from the EPUB's own bytes.
+class ReaderView : public QWebEngineView {
+public:
+    using QWebEngineView::QWebEngineView;
+
+    std::function<void(const QPoint &, const QUrl &)> onImageContextMenu;
+
+protected:
+    void contextMenuEvent(QContextMenuEvent *event) override
+    {
+        const QWebEngineContextMenuRequest *req = lastContextMenuRequest();
+        if (req && req->mediaType() == QWebEngineContextMenuRequest::MediaTypeImage
+            && onImageContextMenu) {
+            onImageContextMenu(event->globalPos(), req->mediaUrl());
+            return;
+        }
+        QWebEngineView::contextMenuEvent(event);
+    }
 };
 
 // Floating translation result popup: a Qt::Popup (so an outside click dismisses
@@ -934,10 +962,31 @@ void MainWindow::ensureWebView()
     if (!schemeHandlerInstalled) {
         QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
             EpubSchemeHandler::schemeName(), EpubSchemeHandler::instance());
+        // Qt WebEngine silently drops any download (e.g. the reading view's
+        // right-click "Save image as...") unless the request is explicitly
+        // accepted or cancelled. Hung off the profile itself, not `this`: the
+        // profile is shared and outlives any single window.
+        connect(QWebEngineProfile::defaultProfile(), &QWebEngineProfile::downloadRequested,
+                QWebEngineProfile::defaultProfile(), [](QWebEngineDownloadRequest *download) {
+                    const QString path = QFileDialog::getSaveFileName(
+                        nullptr, QStringLiteral("保存"), download->suggestedFileName());
+                    if (path.isEmpty()) {
+                        download->cancel();
+                        return;
+                    }
+                    const QFileInfo fi(path);
+                    download->setDownloadDirectory(fi.absolutePath());
+                    download->setDownloadFileName(fi.fileName());
+                    download->accept();
+                });
         schemeHandlerInstalled = true;
     }
 
-    m_view = new QWebEngineView(this);
+    auto *view = new ReaderView(this);
+    view->onImageContextMenu = [this](const QPoint &globalPos, const QUrl &mediaUrl) {
+        handleImageContextMenu(globalPos, mediaUrl);
+    };
+    m_view = view;
     // Navigation-restricted page (see ReaderPage above).
     auto *page = new ReaderPage(m_schemeId, m_view);
     m_view->setPage(page);
@@ -965,6 +1014,43 @@ void MainWindow::ensureWebView()
         delete m_viewPlaceholder;
         m_viewPlaceholder = nullptr;
         m_splitter->setStretchFactor(index, 1);
+    }
+}
+
+void MainWindow::handleImageContextMenu(const QPoint &globalPos, const QUrl &mediaUrl)
+{
+    if (!m_book || mediaUrl.scheme() != QLatin1String("epub") || mediaUrl.host() != m_schemeId)
+        return;
+    const QString zipPath = EpubSchemeHandler::zipPathFor(mediaUrl);
+    if (!m_book->contains(zipPath))
+        return;
+
+    QMenu menu(this);
+    QAction *copyAct = menu.addAction(QStringLiteral("画像をコピー"));
+    QAction *saveAct = menu.addAction(QStringLiteral("名前を付けて画像を保存..."));
+    QAction *chosen = menu.exec(globalPos);
+    if (chosen != copyAct && chosen != saveAct)
+        return;
+
+    // Read straight from the EPUB's own bytes rather than going through
+    // Chromium's copy/download machinery, which never completes for images
+    // served over our custom epub:// scheme.
+    const QByteArray bytes = m_book->readBytes(zipPath);
+    if (chosen == copyAct) {
+        QImage image;
+        if (image.loadFromData(bytes))
+            QGuiApplication::clipboard()->setImage(image);
+        return;
+    }
+
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("名前を付けて画像を保存"), QFileInfo(zipPath).fileName());
+    if (path.isEmpty())
+        return;
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(bytes) < 0 || !f.commit()) {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("保存に失敗しました:\n%1").arg(f.errorString()));
     }
 }
 

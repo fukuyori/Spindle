@@ -35,6 +35,8 @@ class QTimer;
 class QWebEngineView;
 class QWebChannel;
 class QTextEdit;
+class QPoint;
+class QUrl;
 class Bridge;
 class OllamaClient;
 
@@ -142,6 +144,11 @@ private:
     // (the bulk of cold-start time) initializes afterwards / on first use.
     void ensureWebView();
     void restoreViewSettings(); // QSettings restore split out of setupWebChannel
+    // Right-click on an image in the reading pane: Chromium's own "Copy
+    // image"/"Save image" never complete for our custom epub:// scheme, so
+    // this serves both directly from the EPUB's bytes instead (see ReaderView
+    // in MainWindow.cpp).
+    void handleImageContextMenu(const QPoint &globalPos, const QUrl &mediaUrl);
 
     // Web channel / highlights
     void setupWebChannel();
