@@ -94,6 +94,7 @@
 #include <QWebEngineScriptCollection>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
+#include <QWheelEvent>
 
 namespace {
 
@@ -934,9 +935,14 @@ void MainWindow::buildUi()
     // --- web viewer ---
     // The QWebEngineView is NOT created here: constructing it initializes all
     // of Chromium, which dominates cold-start time. A plain placeholder keeps
-    // the splitter slot; ensureWebView() swaps the real view in right after the
-    // window is shown (or immediately when a book is opened).
+    // the splitter slot; ensureWebView() creates the real view right after the
+    // window is shown (or immediately when a book is opened), but it isn't
+    // swapped in until the first navigation actually finishes — see the
+    // m_viewRevealed comment. Themed so there's no color mismatch while it's
+    // shown standing in for the reader.
     m_viewPlaceholder = new QWidget(this);
+    m_viewPlaceholder->setAutoFillBackground(true);
+    updatePlaceholderBackground();
 
     m_splitter = new QSplitter(this);
     m_splitter->addWidget(sidebar);
@@ -948,6 +954,15 @@ void MainWindow::buildUi()
 
     restoreViewSettings();
     syncTranslateViewUi();
+}
+
+void MainWindow::updatePlaceholderBackground()
+{
+    if (!m_viewPlaceholder)
+        return;
+    QPalette pal = m_viewPlaceholder->palette();
+    pal.setColor(QPalette::Window, themeBackground());
+    m_viewPlaceholder->setPalette(pal);
 }
 
 void MainWindow::ensureWebView()
@@ -1008,6 +1023,16 @@ void MainWindow::ensureWebView()
     setupWebChannel();
     injectViewStyle(); // install the pre-paint theme script
 
+    // Not swapped into the splitter yet: the view can load in the background
+    // (Qt WebEngine supports this fine) while the themed placeholder keeps
+    // standing in. See revealWebView(), called from the first onLoadFinished.
+}
+
+void MainWindow::revealWebView()
+{
+    if (m_viewRevealed || !m_view)
+        return;
+    m_viewRevealed = true;
     if (m_splitter && m_viewPlaceholder) {
         const int index = m_splitter->indexOf(m_viewPlaceholder);
         m_splitter->replaceWidget(index, m_view);
@@ -1456,6 +1481,11 @@ void MainWindow::displayChapter(int index, const QString &fragment)
 
 void MainWindow::onLoadFinished(bool ok)
 {
+    // First-ever load for this window: swap the placeholder out for the real
+    // view now, while it's still frozen below — content is ready (success or
+    // not) so there's a real frame to unfreeze into instead of Chromium's
+    // black warm-up surface.
+    revealWebView();
     // Unfreeze first, success or not — the view must never stay frozen.
     m_viewUnfreeze->stop();
     if (m_view)
@@ -1514,6 +1544,52 @@ QString MainWindow::viewStyleCss() const
     // Comfortable left/right reading margins (physical, so they apply equally to
     // horizontal and vertical-rl writing modes). box-sizing keeps them inside.
     css += QStringLiteral(" html{box-sizing:border-box;padding-left:6%;padding-right:6%;}");
+
+    // A chapter made of a single image (common for manga-style EPUBs) fills the
+    // window instead of sitting inside the reading margins. reader.js tags
+    // <html> with this class once it confirms the body holds exactly one image
+    // and no other content. The image is scaled with the same A-/A+ zoom the
+    // user already uses for text (m_fontSize), via a `--spindle-img-zoom`
+    // custom property read by the calc() below. This deliberately does NOT use
+    // `transform: scale()`: a transform only changes paint, not layout, so it
+    // never enlarges the element's scrollable-overflow box — overflow:auto
+    // would have nothing to actually scroll, and reader.js's drag-to-pan
+    // (which moves body.scrollLeft/Top) would have nowhere to move. Sizing the
+    // box itself with width/height: calc(100vw * zoom) is real layout, so it
+    // creates genuine scrollable overflow once zoom exceeds 1 — both the
+    // native scrollbars and the drag-to-pan/mouse-wheel scrolling work on it.
+    // object-fit:contain still letterboxes the image's own aspect ratio
+    // inside that (viewport-shaped) box, so zoom 1 looks identical to the
+    // previous fit-to-window behavior.
+    //
+    // Fixed-layout EPUB pages (e.g. Kindle/Kobo comics) wrap the page image in
+    // one or more plain <div>s and give the <img> itself an inline
+    // position:absolute + fixed pixel width/height (matching the page's own
+    // viewport meta). Inline styles beat any selector without !important, and
+    // absolute positioning takes the image out of flow entirely, so both the
+    // sizing and the flex centering above would otherwise be silently
+    // ignored. Force every non-image wrapper to flex-center its single child
+    // and strip the image's own inline position/size so it participates in
+    // that centering instead.
+    css += QStringLiteral(
+        " html.spindle-image-chapter{padding-left:0 !important;padding-right:0 !important;"
+        "height:100%;--spindle-img-zoom:%1;}"
+        " html.spindle-image-chapter body{margin:0 !important;height:100vh;"
+        "display:flex;align-items:center;justify-content:center;overflow:auto;}"
+        " html.spindle-image-chapter body *:not(img):not(svg):not(image){"
+        "position:static !important;display:flex !important;"
+        "align-items:center !important;justify-content:center !important;"
+        "width:100% !important;height:100% !important;max-width:none !important;"
+        "max-height:none !important;margin:0 !important;padding:0 !important;}"
+        " html.spindle-image-chapter img,html.spindle-image-chapter svg,"
+        "html.spindle-image-chapter image{"
+        "position:static !important;top:auto !important;left:auto !important;"
+        "width:calc(100vw * var(--spindle-img-zoom)) !important;"
+        "height:calc(100vh * var(--spindle-img-zoom)) !important;"
+        "flex:none !important;"
+        "object-fit:contain;display:block !important;margin:auto !important;"
+        "cursor:grab;-webkit-user-drag:none;}")
+                      .arg(QString::number(m_fontSize / 100.0, 'f', 3));
 
     // Optional font override: force the chosen family over the book's own fonts.
     // Skipped in the raw-XHTML source view (which wants its monospace styling).
@@ -1679,8 +1755,18 @@ void MainWindow::previousChapter()
         displayChapter(m_currentChapter - 1);
 }
 
-void MainWindow::increaseFont() { m_fontSize = qMin(m_fontSize + 10, 200); applyZoom(); }
-void MainWindow::decreaseFont() { m_fontSize = qMax(m_fontSize - 10, 50); applyZoom(); }
+void MainWindow::increaseFont()
+{
+    m_fontSize = qMin(m_fontSize + 10, 200);
+    applyZoom();
+    injectViewStyle(); // live-refresh the image-chapter zoom transform, if any
+}
+void MainWindow::decreaseFont()
+{
+    m_fontSize = qMax(m_fontSize - 10, 50);
+    applyZoom();
+    injectViewStyle(); // live-refresh the image-chapter zoom transform, if any
+}
 void MainWindow::setTheme(int theme)
 {
     m_theme = static_cast<Theme>(qBound(0, theme, 2));
@@ -1689,6 +1775,7 @@ void MainWindow::setTheme(int theme)
     QSettings().setValue(QStringLiteral("view/theme"), static_cast<int>(m_theme));
     if (m_view)
         m_view->page()->setBackgroundColor(themeBackground());
+    updatePlaceholderBackground();
     injectViewStyle();
 }
 
@@ -3306,6 +3393,23 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
             openEpubsFromMime(static_cast<QDropEvent *>(event)->mimeData());
             static_cast<QDropEvent *>(event)->acceptProposedAction();
             return true;
+        }
+        break;
+    case QEvent::Wheel:
+        // Ctrl+wheel over the render widget would otherwise reach Chromium's
+        // own page-zoom handling directly, bypassing m_fontSize entirely (and
+        // for an image-only chapter, Chromium's zoom has no visible effect at
+        // all — see the comment on the .spindle-image-chapter transform in
+        // viewStyleCss). Route it through the same A-/A+ path instead, and
+        // swallow the event so Chromium never sees it.
+        if (auto *we = static_cast<QWheelEvent *>(event)) {
+            if (we->modifiers() & Qt::ControlModifier) {
+                if (we->angleDelta().y() > 0)
+                    increaseFont();
+                else if (we->angleDelta().y() < 0)
+                    decreaseFont();
+                return true;
+            }
         }
         break;
     default:

@@ -391,6 +391,76 @@
     setTimeout(function () { target.style.outline = prev; }, 1200);
   }
 
+  // --- image-only chapter fit ---------------------------------------------
+  // Manga-style EPUBs often have a chapter that is just one full-page image.
+  // When so, tag <html> so it fills the window instead of sitting inside the
+  // normal reading margins (see the html.spindle-image-chapter CSS rules
+  // injected from MainWindow::viewStyleCss). Runs independently of the
+  // QWebChannel bridge, so it applies even before/without it.
+  function applyImageFit() {
+    var body = document.body;
+    if (!body) return;
+    var imgs = body.querySelectorAll("img, svg image");
+    var text = (body.textContent || "").replace(/\s+/g, "");
+    var isImageOnly = imgs.length === 1 && text.length === 0;
+    document.documentElement.classList.toggle("spindle-image-chapter", isImageOnly);
+  }
+
+  // --- image-only chapter drag panning ------------------------------------
+  // Once zoomed beyond fit-to-window (see the A-/A+ zoom on
+  // html.spindle-image-chapter in MainWindow::viewStyleCss) the page
+  // overflows and scrolls; let the user drag with the mouse to pan it, like
+  // an image viewer, instead of hunting for scrollbars. Scoped to image-only
+  // chapters (see applyImageFit) so ordinary text chapters keep normal
+  // click-drag text selection.
+  var panState = null;
+  function isImageChapter() {
+    return document.documentElement.classList.contains("spindle-image-chapter");
+  }
+  // The element whose scrollLeft/Top actually moves the page. NOT simply
+  // document.body: in standards mode, body's overflow:auto propagates to the
+  // viewport and body's own used overflow becomes `visible`, making
+  // body.scrollLeft a silent no-op — the real scroller is then
+  // document.scrollingElement (<html>). Probe for whichever element genuinely
+  // has scrollable overflow right now.
+  function panScroller() {
+    var candidates = [
+      document.scrollingElement || document.documentElement,
+      document.body
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      if (el && (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight))
+        return el;
+    }
+    return null; // fit-to-window (zoom <= 100%): nothing to pan
+  }
+  function onImagePanStart(e) {
+    if (!isImageChapter() || e.button !== 0) return;
+    var el = panScroller();
+    if (!el) return;
+    panState = { el: el, x: e.clientX, y: e.clientY,
+                 scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
+    document.body.style.cursor = "grabbing";
+    e.preventDefault(); // suppress native image drag-out and text selection
+  }
+  function onImagePanMove(e) {
+    if (!panState) return;
+    panState.el.scrollLeft = panState.scrollLeft - (e.clientX - panState.x);
+    panState.el.scrollTop = panState.scrollTop - (e.clientY - panState.y);
+  }
+  function onImagePanEnd() {
+    if (!panState) return;
+    panState = null;
+    document.body.style.cursor = "";
+  }
+  document.addEventListener("mousedown", onImagePanStart);
+  document.addEventListener("mousemove", onImagePanMove);
+  document.addEventListener("mouseup", onImagePanEnd);
+  document.addEventListener("dragstart", function (e) {
+    if (isImageChapter()) e.preventDefault();
+  });
+
   function init() {
     new QWebChannel(qt.webChannelTransport, function (channel) {
       window.spindle = channel.objects.spindle;
@@ -407,6 +477,8 @@
     });
     document.addEventListener("mouseup", onMouseUp);
   }
+
+  applyImageFit();
 
   if (typeof QWebChannel !== "undefined" && typeof qt !== "undefined" && qt.webChannelTransport) {
     init();

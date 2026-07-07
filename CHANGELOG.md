@@ -4,6 +4,28 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.4] - 2026-07-07
+
+### Added
+- **Image-only chapters fit the window.** A chapter consisting of a single
+  image (manga-style EPUBs, including fixed-layout pages that position the
+  image with inline `position:absolute` and fixed pixel sizes) now scales to
+  fit the reading pane, centered, instead of rendering at its native size
+  inside the text margins.
+- **Image chapters zoom past 100%.** The A−/A+ buttons and Ctrl+mouse wheel
+  now enlarge an image chapter beyond fit-to-window (up to the same 200%
+  ceiling as text). Ctrl+wheel is routed through the app's own zoom instead
+  of Chromium's page zoom, so both inputs share one zoom state.
+- **Drag to pan.** When an image chapter is zoomed beyond the window, the
+  image can be dragged with the mouse to move the visible area (grab cursor;
+  the native image drag-out is suppressed while panning).
+
+### Fixed
+- **Black flash on startup.** The first window briefly painted black while
+  Chromium produced its first frame. The reading pane now keeps a
+  theme-colored placeholder on screen and swaps in the web view only when
+  the first page has actually finished loading.
+
 ## [0.4.3] - 2026-07-07
 
 ### Fixed
@@ -419,6 +441,8 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.4.4]: https://github.com/fukuyori/Spindle/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/fukuyori/Spindle/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/fukuyori/Spindle/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/fukuyori/Spindle/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fukuyori/Spindle/compare/v0.3.5...v0.4.0

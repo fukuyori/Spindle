@@ -143,6 +143,8 @@ private:
     // Deferred web-view creation: the window shows immediately and Chromium
     // (the bulk of cold-start time) initializes afterwards / on first use.
     void ensureWebView();
+    void revealWebView();          // swap the placeholder for m_view once ready
+    void updatePlaceholderBackground(); // keep the placeholder themed while shown
     void restoreViewSettings(); // QSettings restore split out of setupWebChannel
     // Right-click on an image in the reading pane: Chromium's own "Copy
     // image"/"Save image" never complete for our custom epub:// scheme, so
@@ -239,6 +241,12 @@ private:
     QWebEngineView *m_view = nullptr; // created lazily — see ensureWebView()
     QSplitter *m_splitter = nullptr;
     QWidget *m_viewPlaceholder = nullptr; // holds the view's splitter slot until then
+    // Chromium's first-ever composited frame on a brand-new QWebEngineView is
+    // black regardless of any Qt-side palette/background — the widget's own
+    // native render surface hasn't produced real output yet. Keep the themed
+    // placeholder in the splitter until the first navigation actually
+    // finishes (see onLoadFinished), instead of revealing the view up front.
+    bool m_viewRevealed = false;
     QWebChannel *m_channel = nullptr;
     Bridge *m_bridge = nullptr;
     OllamaClient *m_ollama = nullptr;
