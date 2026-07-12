@@ -320,6 +320,22 @@ QString targetLanguagePrompt(const QString &code)
     return code;
 }
 
+// "Japanese (日本語)" — the target-language form handed to OllamaClient::translate.
+// Both the English name and the native label matter: translation-tuned models
+// key on this exact shape, and wording drift has flipped models into answering
+// in the wrong language (see translate()'s user turn).
+QString targetLanguageNameAndLabel(const QString &code)
+{
+    for (const Lang &l : kLangs) {
+        if (code == QLatin1String(l.code)) {
+            const QString name = QString::fromUtf8(l.name);
+            const QString label = QString::fromUtf8(l.label);
+            return name == label ? name : QStringLiteral("%1 (%2)").arg(name, label);
+        }
+    }
+    return code;
+}
+
 QString compactPreview(const QString &text, qsizetype maxChars = 240)
 {
     QString s = text;
@@ -2369,8 +2385,8 @@ void MainWindow::exportTranslateNext()
         const int reqId = ++m_trReqSeq;
         m_exportReqs.insert(reqId, text);
         ++m_exportInFlight;
-        m_exportOllama->translate(m_trEndpoint, m_trModel, targetLanguagePrompt(m_trTarget), text,
-                                  m_trGlossary.promptBlockForText(text), reqId);
+        m_exportOllama->translate(m_trEndpoint, m_trModel, targetLanguageNameAndLabel(m_trTarget), text,
+                                  m_trGlossary.promptBlockForText(text), reqId, m_trTarget);
     }
 }
 
@@ -2602,8 +2618,8 @@ void MainWindow::translateNext(int run)
         if (m_bridge)
             m_bridge->applyTranslation(item.first, QStringLiteral("翻訳中…"),
                                        QStringLiteral("pending"));
-        m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), item.second,
-                            m_trGlossary.promptBlockForText(item.second), reqId);
+        m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageNameAndLabel(m_trTarget), item.second,
+                            m_trGlossary.promptBlockForText(item.second), reqId, m_trTarget);
     }
 }
 
@@ -2645,8 +2661,9 @@ void MainWindow::translateSelection(const QString &text)
     if (src.isEmpty())
         return;
     showTranslatePopup(QStringLiteral("翻訳中…"));
-    m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageName(m_trTarget), src,
-                                 m_trGlossary.promptBlockForText(src), ++m_selectionReqSeq);
+    m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageNameAndLabel(m_trTarget), src,
+                                 m_trGlossary.promptBlockForText(src), ++m_selectionReqSeq,
+                                 m_trTarget);
 }
 
 void MainWindow::onSelectionTranslated(int requestId, bool ok, const QString &result)

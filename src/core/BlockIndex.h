@@ -3,6 +3,8 @@
 #include <QString>
 #include <QVector>
 
+class QDomElement;
+
 // Shared block enumeration: the single authority for "document-order block
 // number" used by both highlight anchoring (data-spindle-block injected into the
 // served HTML) and Kindle import matching. A block is a leaf block element (one
@@ -15,6 +17,17 @@ struct BlockInfo {
     int index = 0;  // document-order block number (== data-spindle-block)
     QString text;   // block text content (script/style excluded, nbsp -> space)
 };
+
+// Some EPUBs (often converted ones) carry chapter prose as bare text directly
+// inside <div>/<body>, separated by <br/><br/> instead of <p> elements — such
+// text has no leaf block and would be invisible to highlighting, matching, and
+// translation. This wraps each run of bare inline content into a synthetic
+// <p style="margin:0"> (splitting at 2+ consecutive <br>, which are consumed
+// so the visual spacing is preserved). Deterministic, so every consumer that
+// parses the same XHTML gets the same block numbering. Called by
+// enumerateBlocks/scanChapter/injectBlockIds; exposed for the EPUB exporter,
+// which parses chapters itself.
+void normalizeBareText(QDomElement body);
 
 // Leaf blocks of the chapter, in document order. Empty if the XHTML won't parse.
 QVector<BlockInfo> enumerateBlocks(const QString &xhtml);

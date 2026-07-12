@@ -4,6 +4,36 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.5] - 2026-07-12
+
+### Added
+- **Bare-text chapters are now translatable.** Some EPUBs (often converted
+  ones, e.g. Aozora/Gutenberg conversions) carry chapter prose as bare text
+  directly inside `<div>`/`<body>`, separated by `<br/><br/>` instead of
+  `<p>` elements. Such text had no block structure, so translation,
+  highlighting, search jumps, and Kindle-note matching only saw the headings.
+  Chapters are now normalized on load: each run of bare inline text becomes a
+  synthetic paragraph (split at 2+ consecutive `<br>`, spacing preserved),
+  consistently across the reading view, sidecar caches, and translated-EPUB
+  export.
+- **Wrong-language translations are caught.** When the model answers in a
+  language whose script clearly doesn't match the target (e.g. Chinese
+  returned for a Japanese target), the request is retried once with a
+  stronger instruction; if it still doesn't comply the paragraph shows an
+  error instead of caching the wrong text.
+
+### Fixed
+- **Chinese ⇄ Japanese translation reliability.** The translation prompt
+  told the model to return text "already in the target language" unchanged,
+  which made kanji-heavy Japanese pass through untranslated with a Chinese
+  target (and vice versa) — and the untranslated result was then cached.
+  The prompt now states the task in the user turn in a form that
+  translation-tuned models (e.g. TranslateGemma) also follow, and no longer
+  offers the pass-through escape hatch.
+- **Reasoning models' chain of thought leaked into translations.** Content
+  ending with a `</think>` marker (e.g. Qwen3 with thinking nominally
+  disabled) now has everything before the marker stripped.
+
 ## [0.4.4] - 2026-07-07
 
 ### Added
@@ -441,6 +471,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.4.5]: https://github.com/fukuyori/Spindle/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/fukuyori/Spindle/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/fukuyori/Spindle/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/fukuyori/Spindle/compare/v0.4.1...v0.4.2

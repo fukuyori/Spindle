@@ -54,7 +54,13 @@ QString extractOllamaContent(const QByteArray &bytes, const QString &emptyMessag
         return apiError;
 
     const QJsonObject message = root.value(QStringLiteral("message")).toObject();
-    const QString content = message.value(QStringLiteral("content")).toString().trimmed();
+    QString content = message.value(QStringLiteral("content")).toString().trimmed();
+    // Reasoning models (e.g. Qwen3) can inline their chain of thought in the
+    // content even with think:false, ending it with "</think>" — keep only
+    // what follows the marker.
+    const qsizetype think = content.lastIndexOf(QLatin1String("</think>"));
+    if (think >= 0)
+        content = content.mid(think + qsizetype(qstrlen("</think>"))).trimmed();
     if (!content.isEmpty()) {
         *ok = true;
         return content;
@@ -93,6 +99,43 @@ QString extractOllamaContent(const QByteArray &bytes, const QString &emptyMessag
                          : emptyMessage + suffix + QStringLiteral("\n応答: %1").arg(raw);
 }
 
+// True when `text` is clearly NOT written in the language `code` — judged by
+// script, and only for scripts we can tell apart reliably (kana for ja, Han
+// without kana for zh, hangul for ko, Latin for en/fr/de/es). Short results
+// are never flagged: a translated proper noun can legitimately be all-Han
+// even in Japanese. Used to catch a model answering in the source language.
+bool clearlyWrongLanguage(const QString &text, const QString &code)
+{
+    int han = 0, kana = 0, hangul = 0, latin = 0, letters = 0;
+    for (const QChar &qc : text) {
+        const ushort u = qc.unicode();
+        if (qc.isLetter())
+            ++letters;
+        if ((u >= 0x4E00 && u <= 0x9FFF) || (u >= 0x3400 && u <= 0x4DBF)
+            || (u >= 0xF900 && u <= 0xFAFF))
+            ++han;
+        else if (u >= 0x3040 && u <= 0x30FF)
+            ++kana;
+        else if ((u >= 0xAC00 && u <= 0xD7A3) || (u >= 0x1100 && u <= 0x11FF))
+            ++hangul;
+        else if ((u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z')
+                 || (u >= 0x00C0 && u <= 0x024F))
+            ++latin;
+    }
+    if (letters < 12)
+        return false; // too short to judge
+    if (code == QLatin1String("ja"))
+        return kana == 0; // Japanese prose always carries kana
+    if (code == QLatin1String("zh"))
+        return kana > 0 || (han == 0 && latin > han) || hangul > letters / 2;
+    if (code == QLatin1String("ko"))
+        return hangul == 0;
+    if (code == QLatin1String("en") || code == QLatin1String("fr")
+        || code == QLatin1String("de") || code == QLatin1String("es"))
+        return latin < letters / 2; // mostly non-Latin -> not translated
+    return false; // unknown target: no opinion
+}
+
 } // namespace
 
 OllamaClient::OllamaClient(QObject *parent)
@@ -102,7 +145,16 @@ OllamaClient::OllamaClient(QObject *parent)
 
 void OllamaClient::translate(const QString &endpoint, const QString &model,
                              const QString &targetLang, const QString &text,
-                             const QString &glossary, int requestId)
+                             const QString &glossary, int requestId,
+                             const QString &targetCode)
+{
+    translateAttempt(endpoint, model, targetLang, text, glossary, requestId, targetCode, 1);
+}
+
+void OllamaClient::translateAttempt(const QString &endpoint, const QString &model,
+                                    const QString &targetLang, const QString &text,
+                                    const QString &glossary, int requestId,
+                                    const QString &targetCode, int attempt)
 {
     QString base = endpoint.trimmed();
     while (base.endsWith(QLatin1Char('/')))
@@ -113,11 +165,30 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
         QStringLiteral(
             "You are a professional literary translator. Translate the user's text into %1. "
             "Output only the translation itself — no explanations, notes, labels, or surrounding "
-            "quotation marks. Preserve the original meaning, tone, and punctuation. If the text is "
-            "already in %1, return it unchanged.")
+            "quotation marks. Preserve the original meaning, tone, and punctuation. Always "
+            "translate: languages that share a script are still different languages (e.g. "
+            "Japanese is not Chinese), so return the text unchanged only if it is already "
+            "entirely written in %1.")
             .arg(targetLang);
     if (!glossary.isEmpty())
         system += glossary;
+    // Translation-tuned models (e.g. TranslateGemma) ignore system-turn
+    // instructions and expect the task stated right before the text, so the
+    // user turn repeats it. Instruction-following models just see it twice.
+    // The wording is load-bearing: "to Japanese. Provide only the
+    // translation…" made gemma answer in the source language, while this
+    // phrasing tested clean on both model families — don't reword casually.
+    QString user =
+        QStringLiteral("Translate the following text into %1. "
+                       "Output only the %1 translation:\n\n%2")
+            .arg(targetLang, text);
+    if (attempt > 1) {
+        // Retry after a wrong-language reply: nudge the sampling with an
+        // explicit reminder (an identical request at low temperature would
+        // mostly reproduce the same wrong answer).
+        user += QStringLiteral("\n\nIMPORTANT: The translation must be written in %1.")
+                    .arg(targetLang);
+    }
 
     QJsonObject body;
     body[QStringLiteral("model")] = model;
@@ -130,7 +201,7 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
     messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
                                 {QStringLiteral("content"), system}});
     messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
-                                {QStringLiteral("content"), text}});
+                                {QStringLiteral("content"), user}});
     body[QStringLiteral("messages")] = messages;
 
     QNetworkRequest request(url);
@@ -139,7 +210,8 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, url, requestId]() {
+            [this, reply, url, requestId, endpoint, model, targetLang, text, glossary,
+             targetCode, attempt]() {
         reply->deleteLater();
         const QByteArray bytes = reply->readAll();
         if (reply->error() != QNetworkReply::NoError) {
@@ -153,6 +225,18 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
             extractOllamaContent(bytes, QStringLiteral("Ollama が空の翻訳を返しました"), &ok);
         if (!ok) {
             emit finished(requestId, false, result);
+            return;
+        }
+        if (!targetCode.isEmpty() && clearlyWrongLanguage(result, targetCode)) {
+            if (attempt < 2) {
+                translateAttempt(endpoint, model, targetLang, text, glossary, requestId,
+                                 targetCode, attempt + 1);
+                return;
+            }
+            emit finished(requestId, false,
+                          QStringLiteral("モデルが翻訳先言語 (%1) で応答しませんでした。"
+                                         "別のモデルをお試しください")
+                              .arg(targetLang));
             return;
         }
         emit finished(requestId, true, result);

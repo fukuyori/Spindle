@@ -1,5 +1,6 @@
 #include "core/TranslatedEpub.h"
 
+#include "core/BlockIndex.h"
 #include "epub/EpubBook.h"
 #include "model/TranslationCache.h"
 
@@ -112,6 +113,8 @@ QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCa
     if (body.isNull())
         return xhtml.toUtf8();
 
+    // Same bare-text wrapping as the reading view, so cache keys line up.
+    block_index::normalizeBareText(body);
     QVector<QDomElement> blocks;
     collectLeafBlocks(body, blocks);
 
@@ -184,6 +187,7 @@ QStringList collectMissing(const EpubBook &book, const TranslationCache &cache)
         QDomElement body = bodyOf(doc);
         if (body.isNull())
             continue;
+        block_index::normalizeBareText(body);
         QVector<QDomElement> blocks;
         collectLeafBlocks(body, blocks);
         for (const QDomElement &block : blocks) {
