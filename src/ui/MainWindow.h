@@ -9,6 +9,7 @@
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QHash>
+#include <QLocale>
 #include <QMainWindow>
 #include <QPair>
 #include <QString>
@@ -39,6 +40,8 @@ class QPoint;
 class QUrl;
 class Bridge;
 class OllamaClient;
+class TtsController;
+class TtsEngine;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -195,6 +198,20 @@ private:
     void showTranslatePopup(const QString &text);
     void showSummaryDialog(const QString &title, const QString &text);
 
+    // Read-aloud (読み上げ): TTS of the current chapter, block by block,
+    // following the translation display mode (原文 / 対訳 / 訳文). Block text
+    // is fetched from the page DOM (ruby read as its <rt> reading), and the
+    // spoken block is tinted + scrolled into view by reader.js.
+    void ensureTts();          // lazy engine/controller creation (first use)
+    void toggleSpeech();       // play / pause / resume
+    void stopSpeech();
+    void startSpeech();        // query the page for blocks, then play
+    void openTtsDialog();      // 速度と言語別音声の設定
+    void updateSpeechActions();
+    void applyTtsVoiceSettings(); // push tts/voice/* settings into the engine
+    void clearSpeechMark();
+    QLocale bookLocale() const;
+
     // Translated-EPUB export: queue-driven async translation (2 requests in
     // flight, no nested event loop; cancel keeps already-translated paragraphs).
     void startTranslatedEpubExport(const QStringList &missing);
@@ -306,6 +323,17 @@ private:
     int m_exportDone = 0;
     int m_exportMode = 0; // 0 bilingual, 1 translation-only
     bool m_exportActive = false;
+
+    // Read-aloud state (created lazily in ensureTts).
+    TtsEngine *m_tts = nullptr;
+    TtsController *m_ttsCtl = nullptr;
+    bool m_ttsInit = false;       // engine creation attempted (may have failed)
+    QAction *m_speakToggleAct = nullptr;
+    QAction *m_speakStopAct = nullptr;
+    QAction *m_speakAutoAdvanceAct = nullptr;
+    double m_ttsRate = 0.0;       // -1..1 (persisted as tts/rate)
+    int m_ttsRun = 0;             // guards stale page-info callbacks
+    bool m_ttsPendingPlay = false; // auto-advance: resume speech after the load
 
     // Freezes view repaints during chapter navigation (the previous chapter
     // stays on screen until the new one has finished loading — no intermediate

@@ -4,6 +4,24 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-12
+
+### Added
+- **Read-aloud (読み上げ).** The current chapter can be spoken block by block
+  with the OS speech voices (Qt TextToSpeech; WinRT/SAPI on Windows,
+  AVSpeechSynthesizer on macOS, speech-dispatcher on Linux). Reading follows
+  the translation display mode — 原文 and 対訳 read the source text, 訳文
+  reads the translation (falling back to the source where none is cached
+  yet) — with the voice matched to the spoken language. The spoken paragraph
+  is tinted and auto-scrolled into view,
+  `<ruby>` text is spoken as its `<rt>` reading instead of base + furigana
+  concatenated, reading starts from the paragraph currently on screen, and the
+  chapter end can auto-advance into the next chapter (読み上げ menu toggle).
+  Speech rate and a per-language voice are configurable in 読み上げ > 音声設定;
+  play/pause/stop live on the toolbar and in the new 読み上げ menu
+  (Ctrl+Shift+S toggles). Builds without Qt TextToSpeech still compile, with
+  the actions reporting that no speech engine is available.
+
 ## [0.4.5] - 2026-07-12
 
 ### Added
@@ -471,6 +489,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.5.0]: https://github.com/fukuyori/Spindle/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/fukuyori/Spindle/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/fukuyori/Spindle/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/fukuyori/Spindle/compare/v0.4.2...v0.4.3

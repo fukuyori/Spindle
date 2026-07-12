@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.4.5 LANGUAGES C CXX)
+project(Spindle VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +21,9 @@ if(APPLE AND NOT CMAKE_PREFIX_PATH)
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Xml WebEngineWidgets WebChannel Concurrent)
+# Read-aloud uses Qt TextToSpeech (OS voices) when present; without it the app
+# still builds, with the 読み上げ actions reporting no speech engine.
+find_package(Qt6 COMPONENTS TextToSpeech QUIET)
 
 qt_standard_project_setup()
 
@@ -82,9 +85,22 @@ qt_add_executable(spindle
   src/core/AozoraExport.h
   src/core/TranslatedEpub.cpp
   src/core/TranslatedEpub.h
+  src/tts/TtsEngine.cpp
+  src/tts/TtsEngine.h
+  src/tts/TtsController.cpp
+  src/tts/TtsController.h
   src/ui/MainWindow.cpp
   src/ui/MainWindow.h
 )
+
+if(Qt6TextToSpeech_FOUND)
+  target_sources(spindle PRIVATE
+    src/tts/QtTtsEngine.cpp
+    src/tts/QtTtsEngine.h
+  )
+  target_compile_definitions(spindle PRIVATE SPINDLE_HAS_QT_TTS)
+  target_link_libraries(spindle PRIVATE Qt6::TextToSpeech)
+endif()
 
 # This is a Widgets/WebEngine app with no QML sources. Skipping Qt's QML import
 # scanner avoids running an unnecessary host tool during configure/build.

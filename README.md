@@ -59,6 +59,14 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
   from the cache (missing paragraphs are translated on export); the output's
   language metadata is set to the target language.
+- **Read-aloud (TTS)** — speak the current chapter block by block using the
+  OS speech voices (Qt TextToSpeech: WinRT/SAPI, AVSpeechSynthesizer,
+  speech-dispatcher). The translation-only view reads the translation; the
+  original and bilingual views read the original — with the voice matched to
+  the language, the spoken paragraph tinted and kept in view, ruby text spoken
+  as its reading, and optional auto-advance to the next chapter. Speed and a
+  per-language voice are configurable; play/pause/stop from the toolbar or the
+  読み上げ menu.
 - **XHTML source view** — toggle the current chapter between the rendered view
   and its raw markup.
 - **Comfortable reading margins** and a collapsible sidebar.

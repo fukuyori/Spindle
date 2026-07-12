@@ -391,6 +391,110 @@
     setTimeout(function () { target.style.outline = prev; }, 1200);
   }
 
+  // --- read-aloud ----------------------------------------------------------
+  // Speech text + "currently reading" marker for the C++ TTS controller
+  // (MainWindow drives these via runJavaScript). Indexing shares
+  // window.__spindleBlocks with translation, so a speech index and a
+  // translation index refer to the same block.
+  function speechBlocks() {
+    if (!window.__spindleBlocks) window.__spindleBlocks = collectLeafBlocks();
+    return window.__spindleBlocks;
+  }
+  function speechNormalize(text) {
+    return (text || "").replace(/\s+/g, " ").trim();
+  }
+  // The block's text with each <ruby> spoken as its <rt> reading — the
+  // author-specified reading; reading base text + furigana concatenated
+  // (plain textContent) garbles speech. A ruby without <rt> keeps its base.
+  function speechTextOf(el) {
+    var clone = el.cloneNode(true);
+    var rubies = clone.querySelectorAll("ruby");
+    for (var i = 0; i < rubies.length; i++) {
+      var rts = rubies[i].querySelectorAll("rt");
+      var reading = "";
+      for (var k = 0; k < rts.length; k++) reading += rts[k].textContent;
+      if (reading.trim()) rubies[i].textContent = reading;
+    }
+    return speechNormalize(clone.textContent);
+  }
+  // The block's finished translation node (pending/error placeholders excluded).
+  function speechTrNode(block) {
+    var t = block.nextElementSibling;
+    if (t && t.classList.contains("spindle-translation") && !t.getAttribute("data-state"))
+      return t;
+    return null;
+  }
+  var speechMarked = null;
+  function ensureSpeechStyle() {
+    var id = "__spindle_speak";
+    if (document.getElementById(id)) return;
+    var s = document.createElement("style");
+    s.id = id;
+    s.textContent =
+      ".spindle-speaking{background-color:rgba(244,162,89,0.22) !important;border-radius:3px;}";
+    document.documentElement.appendChild(s);
+  }
+  window.__spindleSpeech = {
+    // {count, start}: block count and the first block currently in the viewport
+    // (reading starts where the user is, not at the chapter top).
+    info: function () {
+      var blocks = speechBlocks();
+      var start = 0;
+      for (var i = 0; i < blocks.length; i++) {
+        var r = blocks[i].getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        if (r.bottom > 0 && r.top < window.innerHeight &&
+            r.right > 0 && r.left < window.innerWidth) {
+          start = i;
+          break;
+        }
+      }
+      return JSON.stringify({ count: blocks.length, start: start });
+    },
+    // Speech text of block i. side "translation" reads the finished
+    // translation; fallback=true substitutes the original text when there is
+    // none (lang "" marks the result as original-language for voice choice).
+    text: function (i, side, fallback) {
+      var el = speechBlocks()[i];
+      if (!el) return JSON.stringify({ text: "", lang: "" });
+      if (side === "translation") {
+        var t = speechTrNode(el);
+        if (t)
+          return JSON.stringify({
+            text: speechNormalize(t.textContent),
+            lang: t.getAttribute("lang") || currentLang || ""
+          });
+        if (!fallback) return JSON.stringify({ text: "", lang: "" });
+      }
+      return JSON.stringify({ text: speechTextOf(el), lang: "" });
+    },
+    // Tint + scroll to the block being spoken. Marks whichever element of the
+    // original/translation pair is visible (the spoken side may be hidden in
+    // the current view).
+    mark: function (i, side) {
+      this.clear();
+      var el = speechBlocks()[i];
+      if (!el) return;
+      ensureSpeechStyle();
+      var tr = el.nextElementSibling;
+      if (!(tr && tr.classList.contains("spindle-translation"))) tr = null;
+      var preferred = side === "translation" ? tr : el;
+      var target = isVisible(preferred) ? preferred
+                 : isVisible(el) ? el
+                 : isVisible(tr) ? tr : null;
+      if (!target) return;
+      target.classList.add("spindle-speaking");
+      speechMarked = target;
+      target.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    },
+    clear: function () {
+      if (speechMarked) speechMarked.classList.remove("spindle-speaking");
+      speechMarked = null;
+      var stray = document.querySelectorAll(".spindle-speaking");
+      for (var i = 0; i < stray.length; i++) stray[i].classList.remove("spindle-speaking");
+    }
+  };
+
   // --- image-only chapter fit ---------------------------------------------
   // Manga-style EPUBs often have a chapter that is just one full-page image.
   // When so, tag <html> so it fills the window instead of sitting inside the

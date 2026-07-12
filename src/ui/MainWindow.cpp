@@ -11,6 +11,8 @@
 #include "model/HighlightStore.h"
 #include "model/SummaryStore.h"
 #include "net/OllamaClient.h"
+#include "tts/TtsController.h"
+#include "tts/TtsEngine.h"
 #include "web/Bridge.h"
 #include "web/EpubSchemeHandler.h"
 
@@ -54,6 +56,7 @@
 #include <QPainter>
 #include <QPen>
 #include <QPixmap>
+#include <QPointer>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -505,6 +508,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    stopSpeech();
     QSettings().setValue(QStringLiteral("window/geometry"), saveGeometry());
     QMainWindow::closeEvent(event);
 }
@@ -751,6 +755,24 @@ void MainWindow::buildUi()
                 [this, item] { setSummaryDetail(static_cast<int>(item.detail)); });
     }
 
+    QMenu *speechMenu = menuBar()->addMenu(QStringLiteral("読み上げ"));
+    m_speakToggleAct = speechMenu->addAction(QStringLiteral("▶ 読み上げ"), this,
+                                             &MainWindow::toggleSpeech);
+    m_speakToggleAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
+    m_speakToggleAct->setToolTip(QStringLiteral("現在の章を読み上げ / 一時停止"));
+    m_speakStopAct = speechMenu->addAction(QStringLiteral("■ 停止"), this,
+                                           &MainWindow::stopSpeech);
+    m_speakStopAct->setToolTip(QStringLiteral("読み上げを停止"));
+    m_speakStopAct->setEnabled(false);
+    speechMenu->addSeparator();
+    m_speakAutoAdvanceAct = speechMenu->addAction(QStringLiteral("章末で次の章へ進む"));
+    m_speakAutoAdvanceAct->setCheckable(true);
+    m_speakAutoAdvanceAct->setChecked(
+        QSettings().value(QStringLiteral("tts/autoAdvance"), true).toBool());
+    connect(m_speakAutoAdvanceAct, &QAction::toggled, this,
+            [](bool on) { QSettings().setValue(QStringLiteral("tts/autoAdvance"), on); });
+    speechMenu->addAction(QStringLiteral("音声設定…"), this, &MainWindow::openTtsDialog);
+
     QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
     helpMenu->addAction(QStringLiteral("Spindle について"), this, &MainWindow::showAboutDialog);
 
@@ -833,6 +855,10 @@ void MainWindow::buildUi()
         connect(act, &QAction::triggered, this, [this, i] { setTranslateView(i); });
         m_viewModeActs[i] = act;
     }
+    toolbar->addSeparator();
+    // Read-aloud: the same QActions as the 読み上げ menu.
+    toolbar->addAction(m_speakToggleAct);
+    toolbar->addAction(m_speakStopAct);
     toolbar->addSeparator();
     QAction *fontMinus = toolbar->addAction(QStringLiteral("A−"), this,
                                             &MainWindow::decreaseFont);
@@ -1448,6 +1474,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
         return;
 
     m_currentChapter = index;
+    stopSpeech(); // reading aloud does not survive navigation / reloads
     const Chapter &chapter = m_book->chapters().at(index);
     saveRecentChapter(m_epubPath, index, chapter.label);
 
@@ -1533,6 +1560,16 @@ void MainWindow::onLoadFinished(bool ok)
     }
     if (m_view)
         m_view->setFocus(); // keep keyboard focus on the reading pane after a load
+    if (m_ttsPendingPlay) {
+        // Auto-advance read-aloud: the previous chapter finished speaking and
+        // this load is the next one. Small delay so the injected reader script
+        // has set itself up (__spindleSpeech) before we query it.
+        m_ttsPendingPlay = false;
+        QTimer::singleShot(300, this, [this] {
+            if (!m_xmlView)
+                startSpeech();
+        });
+    }
 }
 
 void MainWindow::applyZoom()
@@ -3433,6 +3470,272 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         break;
     }
     return QMainWindow::eventFilter(obj, event);
+}
+
+// --- read-aloud (読み上げ) ---------------------------------------------------
+// Speech text comes from the page DOM via reader.js (__spindleSpeech): the
+// same block list the translation pipeline uses, with each <ruby> spoken as
+// its <rt> reading and the translation side read from the injected
+// .spindle-translation nodes. The controller asks for one block side at a
+// time, so translations that stream in while speaking are picked up.
+
+void MainWindow::ensureTts()
+{
+    if (m_ttsInit)
+        return;
+    m_ttsInit = true;
+    m_tts = createTtsEngine(this);
+    if (!m_tts)
+        return;
+    m_ttsRate = qBound(-1.0, QSettings().value(QStringLiteral("tts/rate"), 0.0).toDouble(), 1.0);
+    m_ttsCtl = new TtsController(m_tts, this);
+    m_ttsCtl->setRate(m_ttsRate);
+
+    connect(m_ttsCtl, &TtsController::textRequested, this,
+            [this](int gen, int index, TtsController::Side side) {
+                if (!m_view)
+                    return;
+                // The translation side falls back to the original text where
+                // no finished translation exists yet (untranslated blocks show
+                // the original in 訳文 view too).
+                const QString js =
+                    QStringLiteral(
+                        "window.__spindleSpeech ? __spindleSpeech.text(%1,'%2',true) : ''")
+                        .arg(index)
+                        .arg(side == TtsController::Side::Translation
+                                 ? QStringLiteral("translation")
+                                 : QStringLiteral("original"));
+                QPointer<TtsController> ctl(m_ttsCtl);
+                m_view->page()->runJavaScript(
+                    js, QWebEngineScript::ApplicationWorld,
+                    [ctl, gen, index, side](const QVariant &v) {
+                        if (!ctl)
+                            return;
+                        const QJsonObject o =
+                            QJsonDocument::fromJson(v.toString().toUtf8()).object();
+                        ctl->provideText(gen, index, side,
+                                         o.value(QStringLiteral("text")).toString(),
+                                         o.value(QStringLiteral("lang")).toString());
+                    });
+            });
+    connect(m_ttsCtl, &TtsController::positionChanged, this,
+            [this](int index, TtsController::Side side) {
+                if (!m_view)
+                    return;
+                const QString js =
+                    QStringLiteral("window.__spindleSpeech && __spindleSpeech.mark(%1,'%2')")
+                        .arg(index)
+                        .arg(side == TtsController::Side::Translation
+                                 ? QStringLiteral("translation")
+                                 : QStringLiteral("original"));
+                m_view->page()->runJavaScript(js, QWebEngineScript::ApplicationWorld);
+            });
+    connect(m_ttsCtl, &TtsController::stateChanged, this, &MainWindow::updateSpeechActions);
+    connect(m_ttsCtl, &TtsController::finished, this, [this] {
+        clearSpeechMark();
+        if (m_speakAutoAdvanceAct && m_speakAutoAdvanceAct->isChecked() && m_book
+            && m_currentChapter + 1 < m_book->chapters().size()) {
+            nextChapter();
+            // After nextChapter: displayChapter's stopSpeech() would clear it.
+            m_ttsPendingPlay = true; // picked up in onLoadFinished
+        } else {
+            statusBar()->showMessage(QStringLiteral("読み上げを終了しました"), 3000);
+        }
+    });
+    connect(m_ttsCtl, &TtsController::errorOccurred, this, [this](const QString &message) {
+        clearSpeechMark();
+        statusBar()->showMessage(QStringLiteral("読み上げエラー: ") + message, 5000);
+    });
+}
+
+void MainWindow::toggleSpeech()
+{
+    if (!m_book || m_xmlView)
+        return;
+    ensureTts();
+    if (!m_ttsCtl) {
+        statusBar()->showMessage(QStringLiteral("音声合成エンジンが利用できません"), 5000);
+        return;
+    }
+    switch (m_ttsCtl->state()) {
+    case TtsController::State::Speaking: m_ttsCtl->pause(); break;
+    case TtsController::State::Paused: m_ttsCtl->resume(); break;
+    case TtsController::State::Idle: startSpeech(); break;
+    }
+}
+
+void MainWindow::stopSpeech()
+{
+    m_ttsPendingPlay = false;
+    ++m_ttsRun; // cancel a pending page-info callback
+    if (m_ttsCtl && m_ttsCtl->state() != TtsController::State::Idle) {
+        m_ttsCtl->stop();
+        clearSpeechMark();
+    }
+}
+
+void MainWindow::startSpeech()
+{
+    if (!m_ttsCtl || !m_view || !m_book || m_currentChapter < 0)
+        return;
+    applyTtsVoiceSettings();
+    m_ttsCtl->setRate(m_ttsRate);
+    m_ttsCtl->setOriginalLocale(bookLocale());
+
+    // 訳文 view reads the translation; 原文 and 対訳 read the original (the
+    // book-language lock pins such books to 原文 regardless).
+    const TtsController::Mode mode =
+        (!isBookLanguage(m_trTarget) && m_translateView == TranslateView::Translation)
+            ? TtsController::Mode::Translation
+            : TtsController::Mode::Original;
+
+    const int run = ++m_ttsRun;
+    QPointer<MainWindow> self(this);
+    m_view->page()->runJavaScript(
+        QStringLiteral("window.__spindleSpeech ? __spindleSpeech.info() : ''"),
+        QWebEngineScript::ApplicationWorld, [self, run, mode](const QVariant &v) {
+            if (!self || run != self->m_ttsRun || !self->m_ttsCtl)
+                return;
+            const QJsonObject o = QJsonDocument::fromJson(v.toString().toUtf8()).object();
+            const int count = o.value(QStringLiteral("count")).toInt();
+            if (count <= 0) {
+                self->statusBar()->showMessage(
+                    QStringLiteral("読み上げできる本文がありません"), 3000);
+                return;
+            }
+            self->m_ttsCtl->play(count, o.value(QStringLiteral("start")).toInt(), mode);
+        });
+}
+
+void MainWindow::updateSpeechActions()
+{
+    const TtsController::State state =
+        m_ttsCtl ? m_ttsCtl->state() : TtsController::State::Idle;
+    if (m_speakToggleAct) {
+        switch (state) {
+        case TtsController::State::Speaking:
+            m_speakToggleAct->setText(QStringLiteral("⏸ 一時停止"));
+            break;
+        case TtsController::State::Paused:
+            m_speakToggleAct->setText(QStringLiteral("▶ 再開"));
+            break;
+        case TtsController::State::Idle:
+            m_speakToggleAct->setText(QStringLiteral("▶ 読み上げ"));
+            break;
+        }
+    }
+    if (m_speakStopAct)
+        m_speakStopAct->setEnabled(state != TtsController::State::Idle);
+}
+
+void MainWindow::applyTtsVoiceSettings()
+{
+    if (!m_tts)
+        return;
+    QSettings settings;
+    const QLocale locales[2] = {bookLocale(), QLocale(m_trTarget)};
+    for (const QLocale &locale : locales) {
+        const QString lang = locale.name().section(QLatin1Char('_'), 0, 0);
+        m_tts->setPreferredVoiceName(
+            lang, settings.value(QStringLiteral("tts/voice/") + lang).toString());
+    }
+}
+
+void MainWindow::clearSpeechMark()
+{
+    if (m_view)
+        m_view->page()->runJavaScript(
+            QStringLiteral("window.__spindleSpeech && __spindleSpeech.clear()"),
+            QWebEngineScript::ApplicationWorld);
+}
+
+QLocale MainWindow::bookLocale() const
+{
+    const QString lang = m_book ? m_book->language().trimmed() : QString();
+    if (!lang.isEmpty()) {
+        const QLocale locale(lang);
+        if (locale.language() != QLocale::C)
+            return locale;
+    }
+    return QLocale::system();
+}
+
+void MainWindow::openTtsDialog()
+{
+    ensureTts();
+    if (!m_tts) {
+        QMessageBox::information(
+            this, QStringLiteral("Spindle"),
+            QStringLiteral("音声合成エンジンが利用できません。\nOS の音声合成 (テキスト読み上げ) "
+                           "音声がインストールされているか確認してください。"));
+        return;
+    }
+    stopSpeech(); // voice enumeration switches engine locales — not while speaking
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("読み上げ設定"));
+    QFormLayout *form = new QFormLayout(&dialog);
+
+    QSlider *rateSlider = new QSlider(Qt::Horizontal, &dialog);
+    rateSlider->setRange(-10, 10);
+    rateSlider->setTickPosition(QSlider::TicksBelow);
+    rateSlider->setTickInterval(5);
+    rateSlider->setValue(qRound(m_ttsRate * 10));
+    rateSlider->setMinimumWidth(220);
+    form->addRow(QStringLiteral("速度"), rateSlider);
+
+    // One voice picker per distinct language (原文 / 訳文 may coincide).
+    QSettings settings;
+    struct VoiceRow {
+        QString lang;
+        QComboBox *box;
+    };
+    QVector<VoiceRow> rows;
+    auto addVoiceRow = [&](const QString &labelFormat, const QLocale &locale) {
+        const QString lang = locale.name().section(QLatin1Char('_'), 0, 0);
+        for (const VoiceRow &row : rows)
+            if (row.lang == lang)
+                return;
+        QComboBox *box = new QComboBox(&dialog);
+        box->addItem(QStringLiteral("既定"), QString());
+        const QStringList names = m_tts->voiceNames(locale);
+        for (const QString &name : names)
+            box->addItem(name, name);
+        const int saved =
+            box->findData(settings.value(QStringLiteral("tts/voice/") + lang).toString());
+        box->setCurrentIndex(saved >= 0 ? saved : 0);
+        if (names.isEmpty())
+            box->setToolTip(QStringLiteral("この言語の音声が OS に見つかりません"));
+        form->addRow(labelFormat.arg(locale.nativeLanguageName()), box);
+        rows.append({lang, box});
+    };
+    if (m_book)
+        addVoiceRow(QStringLiteral("原文の音声 (%1)"), bookLocale());
+    addVoiceRow(QStringLiteral("訳文の音声 (%1)"), QLocale(m_trTarget));
+
+    QLabel *hint = new QLabel(
+        QStringLiteral("OS にインストールされている音声から選択します。訳文表示では訳文を、"
+                       "原文・対訳表示では原文を読み上げます。"),
+        &dialog);
+    hint->setWordWrap(true);
+
+    QDialogButtonBox *buttons =
+        new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(hint);
+    form->addRow(buttons);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_ttsRate = rateSlider->value() / 10.0;
+    settings.setValue(QStringLiteral("tts/rate"), m_ttsRate);
+    for (const VoiceRow &row : rows)
+        settings.setValue(QStringLiteral("tts/voice/") + row.lang,
+                          row.box->currentData().toString());
+    if (m_ttsCtl)
+        m_ttsCtl->setRate(m_ttsRate);
+    applyTtsVoiceSettings();
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
