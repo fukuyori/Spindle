@@ -13,6 +13,7 @@
 #include "net/OllamaClient.h"
 #include "tts/TtsController.h"
 #include "tts/TtsEngine.h"
+#include "tts/WavUtil.h"
 #include "web/Bridge.h"
 #include "web/EpubSchemeHandler.h"
 
@@ -63,6 +64,7 @@
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QProgressBar>
+#include <QProgressDialog>
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrent>
 #include <functional>
@@ -509,6 +511,7 @@ MainWindow::~MainWindow()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     stopSpeech();
+    abortTtsExport(QString());
     QSettings().setValue(QStringLiteral("window/geometry"), saveGeometry());
     QMainWindow::closeEvent(event);
 }
@@ -772,6 +775,9 @@ void MainWindow::buildUi()
     connect(m_speakAutoAdvanceAct, &QAction::toggled, this,
             [](bool on) { QSettings().setValue(QStringLiteral("tts/autoAdvance"), on); });
     speechMenu->addAction(QStringLiteral("音声設定…"), this, &MainWindow::openTtsDialog);
+    speechMenu->addSeparator();
+    speechMenu->addAction(QStringLiteral("章を音声ファイルへ書き出し…"), this,
+                          &MainWindow::exportChapterAudio);
 
     QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
     helpMenu->addAction(QStringLiteral("Spindle について"), this, &MainWindow::showAboutDialog);
@@ -3546,6 +3552,13 @@ void MainWindow::ensureTts()
         clearSpeechMark();
         statusBar()->showMessage(QStringLiteral("読み上げエラー: ") + message, 5000);
     });
+
+    // Audio-file export listens on the engine directly (no playback involved).
+    connect(m_tts, &TtsEngine::synthesized, this, &MainWindow::onTtsExportPcm);
+    connect(m_tts, &TtsEngine::errorOccurred, this, [this](const QString &message) {
+        if (m_ttsExportActive)
+            abortTtsExport(message);
+    });
 }
 
 void MainWindow::toggleSpeech()
@@ -3660,6 +3673,190 @@ QLocale MainWindow::bookLocale() const
     return QLocale::system();
 }
 
+// --- audio-file export -------------------------------------------------------
+
+void MainWindow::exportChapterAudio()
+{
+    if (!m_book || m_currentChapter < 0) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("先に EPUB を開いてください。"));
+        return;
+    }
+    if (m_xmlView || m_ttsExportActive)
+        return;
+    ensureTts();
+    if (!m_tts || !m_ttsCtl) {
+        statusBar()->showMessage(QStringLiteral("音声合成エンジンが利用できません"), 5000);
+        return;
+    }
+    stopSpeech();
+
+    const Chapter &chapter = m_book->chapters().at(m_currentChapter);
+    QString base = m_book->title().isEmpty() ? QFileInfo(m_epubPath).completeBaseName()
+                                             : m_book->title();
+    QString name = base + QStringLiteral(" - ") + chapter.label;
+    name.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("章を音声ファイルへ書き出し"), name + QStringLiteral(".wav"),
+        QStringLiteral("WAV 音声 (*.wav)"));
+    if (path.isEmpty())
+        return;
+
+    applyTtsVoiceSettings();
+    m_tts->setRate(m_ttsRate);
+    m_ttsExportPath = path;
+    m_ttsExportTranslation =
+        !isBookLanguage(m_trTarget) && m_translateView == TranslateView::Translation;
+
+    const int gen = ++m_ttsExportGen;
+    QPointer<MainWindow> self(this);
+    m_view->page()->runJavaScript(
+        QStringLiteral("window.__spindleSpeech ? __spindleSpeech.info() : ''"),
+        QWebEngineScript::ApplicationWorld, [self, gen](const QVariant &v) {
+            if (!self || gen != self->m_ttsExportGen)
+                return;
+            const QJsonObject o = QJsonDocument::fromJson(v.toString().toUtf8()).object();
+            const int count = o.value(QStringLiteral("count")).toInt();
+            if (count <= 0) {
+                self->statusBar()->showMessage(
+                    QStringLiteral("読み上げできる本文がありません"), 3000);
+                return;
+            }
+            self->m_ttsExportActive = true;
+            self->m_ttsExportIndex = 0;
+            self->m_ttsExportCount = count;
+            self->m_ttsExportPcm.clear();
+            self->m_ttsExportRate = 0;
+            auto *dialog = new QProgressDialog(
+                QStringLiteral("章を音声に変換しています…"), QStringLiteral("キャンセル"), 0,
+                count, self);
+            self->m_ttsExportDialog = dialog;
+            dialog->setWindowTitle(QStringLiteral("音声ファイルへ書き出し"));
+            dialog->setWindowModality(Qt::WindowModal);
+            dialog->setMinimumDuration(0);
+            dialog->setAutoClose(false);
+            dialog->setAutoReset(false);
+            connect(dialog, &QProgressDialog::canceled, self,
+                    [self] { if (self) self->abortTtsExport(QString()); });
+            self->ttsExportNext();
+        });
+}
+
+void MainWindow::ttsExportNext()
+{
+    if (!m_ttsExportActive)
+        return;
+    if (m_ttsExportIndex >= m_ttsExportCount) {
+        finishTtsExport();
+        return;
+    }
+    if (m_ttsExportDialog)
+        m_ttsExportDialog->setValue(m_ttsExportIndex);
+    const int gen = m_ttsExportGen;
+    const QString js =
+        QStringLiteral("window.__spindleSpeech ? __spindleSpeech.text(%1,'%2',true) : ''")
+            .arg(m_ttsExportIndex)
+            .arg(m_ttsExportTranslation ? QStringLiteral("translation")
+                                        : QStringLiteral("original"));
+    QPointer<MainWindow> self(this);
+    m_view->page()->runJavaScript(
+        js, QWebEngineScript::ApplicationWorld, [self, gen](const QVariant &v) {
+            if (!self || gen != self->m_ttsExportGen || !self->m_ttsExportActive)
+                return;
+            const QJsonObject o = QJsonDocument::fromJson(v.toString().toUtf8()).object();
+            const QString text = o.value(QStringLiteral("text")).toString().trimmed();
+            const QString lang = o.value(QStringLiteral("lang")).toString();
+            if (text.isEmpty()) {
+                // Nothing to say for this block: skip. Deferred to avoid deep
+                // recursion over a run of empty blocks.
+                ++self->m_ttsExportIndex;
+                QTimer::singleShot(0, self, [self] {
+                    if (self)
+                        self->ttsExportNext();
+                });
+                return;
+            }
+            self->m_tts->setLocale(lang.isEmpty() ? self->bookLocale() : QLocale(lang));
+            if (!self->m_tts->canSynthesize()) {
+                self->abortTtsExport(QStringLiteral(
+                    "選択中の音声はファイル書き出しに対応していません。音声設定で別の音声"
+                    "（VOICEVOX / Piper など）を選んでください。"));
+                return;
+            }
+            self->m_tts->synthesize(text);
+        });
+}
+
+void MainWindow::onTtsExportPcm(int rate, const QByteArray &pcm)
+{
+    if (!m_ttsExportActive || rate <= 0)
+        return;
+    if (m_ttsExportRate == 0)
+        m_ttsExportRate = rate; // first block sets the output format
+    m_ttsExportPcm += rate == m_ttsExportRate
+                          ? pcm
+                          : wav_util::resampleMono16(pcm, rate, m_ttsExportRate);
+    // A short breath between paragraphs.
+    const qsizetype gapSamples = qsizetype(m_ttsExportRate) * 300 / 1000;
+    m_ttsExportPcm.append(gapSamples * 2, '\0');
+    ++m_ttsExportIndex;
+    ttsExportNext();
+}
+
+void MainWindow::finishTtsExport()
+{
+    m_ttsExportActive = false;
+    ++m_ttsExportGen;
+    closeTtsExportDialog();
+    if (m_ttsExportPcm.isEmpty() || m_ttsExportRate <= 0) {
+        statusBar()->showMessage(QStringLiteral("書き出せる音声がありませんでした"), 5000);
+        return;
+    }
+    QSaveFile file(m_ttsExportPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("ファイルを保存できません: %1").arg(m_ttsExportPath));
+        m_ttsExportPcm.clear();
+        return;
+    }
+    file.write(wav_util::buildWav(m_ttsExportRate, m_ttsExportPcm));
+    file.commit();
+    const qint64 seconds = qint64(m_ttsExportPcm.size()) / 2 / m_ttsExportRate;
+    m_ttsExportPcm.clear();
+    statusBar()->showMessage(QStringLiteral("音声ファイルを書き出しました (%1:%2): %3")
+                                 .arg(seconds / 60)
+                                 .arg(seconds % 60, 2, 10, QLatin1Char('0'))
+                                 .arg(m_ttsExportPath),
+                             8000);
+}
+
+void MainWindow::abortTtsExport(const QString &message)
+{
+    if (!m_ttsExportActive)
+        return;
+    m_ttsExportActive = false;
+    ++m_ttsExportGen;
+    if (m_tts)
+        m_tts->stop();
+    m_ttsExportPcm.clear();
+    closeTtsExportDialog();
+    if (!message.isEmpty())
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("音声の書き出しを中止しました:\n") + message);
+    else
+        statusBar()->showMessage(QStringLiteral("音声の書き出しをキャンセルしました"), 3000);
+}
+
+void MainWindow::closeTtsExportDialog()
+{
+    if (!m_ttsExportDialog)
+        return;
+    QProgressDialog *dialog = m_ttsExportDialog;
+    m_ttsExportDialog = nullptr;
+    dialog->close();
+    dialog->deleteLater();
+}
+
 void MainWindow::openTtsDialog()
 {
     ensureTts();
@@ -3685,36 +3882,116 @@ void MainWindow::openTtsDialog()
     form->addRow(QStringLiteral("速度"), rateSlider);
 
     // One voice picker per distinct language (原文 / 訳文 may coincide).
+    // Lists OS voices plus, when reachable/configured, "VOICEVOX: …" and
+    // "Piper: …" entries — the prefix routes the language to that engine.
     QSettings settings;
     struct VoiceRow {
         QString lang;
+        QLocale locale;
         QComboBox *box;
     };
     QVector<VoiceRow> rows;
+    auto populateVoices = [this](const VoiceRow &row) {
+        const QString current = row.box->count()
+                                    ? row.box->currentData().toString()
+                                    : QSettings()
+                                          .value(QStringLiteral("tts/voice/") + row.lang)
+                                          .toString();
+        row.box->clear();
+        row.box->addItem(QStringLiteral("既定"), QString());
+        const QStringList names = m_tts->voiceNames(row.locale);
+        for (const QString &name : names)
+            row.box->addItem(name, name);
+        const int idx = row.box->findData(current);
+        row.box->setCurrentIndex(idx >= 0 ? idx : 0);
+        row.box->setToolTip(names.isEmpty()
+                                ? QStringLiteral("この言語の音声が見つかりません")
+                                : QString());
+    };
     auto addVoiceRow = [&](const QString &labelFormat, const QLocale &locale) {
         const QString lang = locale.name().section(QLatin1Char('_'), 0, 0);
         for (const VoiceRow &row : rows)
             if (row.lang == lang)
                 return;
         QComboBox *box = new QComboBox(&dialog);
-        box->addItem(QStringLiteral("既定"), QString());
-        const QStringList names = m_tts->voiceNames(locale);
-        for (const QString &name : names)
-            box->addItem(name, name);
-        const int saved =
-            box->findData(settings.value(QStringLiteral("tts/voice/") + lang).toString());
-        box->setCurrentIndex(saved >= 0 ? saved : 0);
-        if (names.isEmpty())
-            box->setToolTip(QStringLiteral("この言語の音声が OS に見つかりません"));
+        rows.append({lang, locale, box});
+        populateVoices(rows.last());
         form->addRow(labelFormat.arg(locale.nativeLanguageName()), box);
-        rows.append({lang, box});
     };
     if (m_book)
         addVoiceRow(QStringLiteral("原文の音声 (%1)"), bookLocale());
     addVoiceRow(QStringLiteral("訳文の音声 (%1)"), QLocale(m_trTarget));
 
+    // Local AI engines. The settings are read by the engines on each use, so
+    // they only need to be persisted; 音声一覧を更新 re-queries with the
+    // values as typed.
+    QLineEdit *voicevoxEdit = new QLineEdit(
+        settings
+            .value(QStringLiteral("tts/voicevoxEndpoint"),
+                   QStringLiteral("http://localhost:50021"))
+            .toString(),
+        &dialog);
+    form->addRow(QStringLiteral("VOICEVOX エンドポイント"), voicevoxEdit);
+
+    auto pathRow = [&dialog](QLineEdit *edit, QPushButton *browse) {
+        QWidget *wrap = new QWidget(&dialog);
+        QHBoxLayout *lay = new QHBoxLayout(wrap);
+        lay->setContentsMargins(0, 0, 0, 0);
+        lay->addWidget(edit, 1);
+        lay->addWidget(browse);
+        return wrap;
+    };
+    QLineEdit *piperExeEdit =
+        new QLineEdit(settings.value(QStringLiteral("tts/piperExe")).toString(), &dialog);
+    QPushButton *piperExeBrowse = new QPushButton(QStringLiteral("参照…"), &dialog);
+    connect(piperExeBrowse, &QPushButton::clicked, this, [this, piperExeEdit] {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Piper 実行ファイル"), piperExeEdit->text(),
+#ifdef Q_OS_WIN
+            QStringLiteral("実行ファイル (*.exe)")
+#else
+            QString()
+#endif
+        );
+        if (!path.isEmpty())
+            piperExeEdit->setText(path);
+    });
+    form->addRow(QStringLiteral("Piper 実行ファイル"), pathRow(piperExeEdit, piperExeBrowse));
+
+    QLineEdit *piperDirEdit = new QLineEdit(
+        settings.value(QStringLiteral("tts/piperVoicesDir")).toString(), &dialog);
+    QPushButton *piperDirBrowse = new QPushButton(QStringLiteral("参照…"), &dialog);
+    connect(piperDirBrowse, &QPushButton::clicked, this, [this, piperDirEdit] {
+        const QString path = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("Piper 音声モデル (.onnx) のフォルダ"), piperDirEdit->text());
+        if (!path.isEmpty())
+            piperDirEdit->setText(path);
+    });
+    form->addRow(QStringLiteral("Piper 音声フォルダ"), pathRow(piperDirEdit, piperDirBrowse));
+
+    auto persistEnginePaths = [voicevoxEdit, piperExeEdit, piperDirEdit] {
+        QString ep = voicevoxEdit->text().trimmed();
+        while (ep.endsWith(QLatin1Char('/')))
+            ep.chop(1);
+        if (ep.isEmpty())
+            ep = QStringLiteral("http://localhost:50021");
+        QSettings settings;
+        settings.setValue(QStringLiteral("tts/voicevoxEndpoint"), ep);
+        settings.setValue(QStringLiteral("tts/piperExe"), piperExeEdit->text().trimmed());
+        settings.setValue(QStringLiteral("tts/piperVoicesDir"), piperDirEdit->text().trimmed());
+    };
+    QPushButton *refreshVoices = new QPushButton(QStringLiteral("音声一覧を更新"), &dialog);
+    connect(refreshVoices, &QPushButton::clicked, this,
+            [persistEnginePaths, populateVoices, &rows] {
+                persistEnginePaths(); // engines read these settings when queried
+                for (const VoiceRow &row : rows)
+                    populateVoices(row);
+            });
+    form->addRow(QString(), refreshVoices);
+
     QLabel *hint = new QLabel(
-        QStringLiteral("OS にインストールされている音声から選択します。訳文表示では訳文を、"
+        QStringLiteral("OS の音声に加え、起動中の VOICEVOX と Piper の音声モデルを選択できます"
+                       "（VOICEVOX / Piper を設定したら「音声一覧を更新」）。訳文表示では訳文を、"
                        "原文・対訳表示では原文を読み上げます。"),
         &dialog);
     hint->setWordWrap(true);
@@ -3728,6 +4005,7 @@ void MainWindow::openTtsDialog()
 
     if (dialog.exec() != QDialog::Accepted)
         return;
+    persistEnginePaths();
     m_ttsRate = rateSlider->value() / 10.0;
     settings.setValue(QStringLiteral("tts/rate"), m_ttsRate);
     for (const VoiceRow &row : rows)

@@ -9,7 +9,10 @@ on:
 
 env:
   QT_VERSION: '6.8.3'
-  QT_MODULES: 'qtwebengine qtwebchannel qtpositioning'
+  # qtspeech (read-aloud, OS voices) and qtmultimedia (local AI voice playback
+  # / audio export) are optional at build time but must be present here for
+  # release builds to ship those features.
+  QT_MODULES: 'qtwebengine qtwebchannel qtpositioning qtspeech qtmultimedia'
 
 jobs:
   # ---------------------------------------------------------------- Linux ---

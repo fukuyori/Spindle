@@ -15,6 +15,10 @@ Cross-platform helpers. All output packages land in `dist/`.
 
 - **Qt 6** (Widgets, Network, Xml, WebEngineWidgets, WebChannel), CMake ≥ 3.21,
   a C++17 compiler.
+- Optional: **Qt TextToSpeech** (Qt Speech) for read-aloud with OS voices, and
+  **Qt Multimedia** for the local AI voices (VOICEVOX / Piper) and the
+  audio-file export — without these modules the build simply omits those
+  features.
 - Point the build at your Qt kit when it isn't auto-detected:
   - macOS (Homebrew): auto-detected via `brew --prefix qt`.
   - Linux: system Qt is found automatically, or set `CMAKE_PREFIX_PATH`.

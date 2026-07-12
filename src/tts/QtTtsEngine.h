@@ -2,6 +2,7 @@
 
 #include "tts/TtsEngine.h"
 
+#include <QAudioFormat>
 #include <QHash>
 #include <QVector>
 
@@ -28,6 +29,8 @@ public:
     void pause() override;
     void resume() override;
     void stop() override;
+    bool canSynthesize() const override; // engine capability of the active instance
+    void synthesize(const QString &text) override;
 
 private:
     struct VoiceEntry {
@@ -51,4 +54,10 @@ private:
     // transition then means "finished on its own" (stop() clears the flag so
     // the same transition after a stop stays silent).
     bool m_expectFinish = false;
+    // Offline synthesis in flight: QTextToSpeech::synthesized delivers PCM in
+    // chunks which are accumulated here until the state returns to Ready,
+    // then converted to 16-bit mono in one go.
+    bool m_synthesizing = false;
+    QByteArray m_synthPcm;
+    QAudioFormat m_synthFormat;
 };

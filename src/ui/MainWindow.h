@@ -32,6 +32,7 @@ class QAction;
 class QProgressBar;
 class QStackedWidget;
 class QSplitter;
+class QProgressDialog;
 class QTimer;
 class QWebEngineView;
 class QWebChannel;
@@ -212,6 +213,16 @@ private:
     void clearSpeechMark();
     QLocale bookLocale() const;
 
+    // Audio-file export: synthesize the current chapter block by block with
+    // the read-aloud voices (no playback) and save one 16-bit mono WAV.
+    // Follows the same 原文/訳文 rule as playback.
+    void exportChapterAudio();
+    void ttsExportNext();                                // fetch text, synthesize
+    void onTtsExportPcm(int rate, const QByteArray &pcm); // one block done
+    void finishTtsExport();
+    void abortTtsExport(const QString &message);
+    void closeTtsExportDialog();
+
     // Translated-EPUB export: queue-driven async translation (2 requests in
     // flight, no nested event loop; cancel keeps already-translated paragraphs).
     void startTranslatedEpubExport(const QStringList &missing);
@@ -334,6 +345,17 @@ private:
     double m_ttsRate = 0.0;       // -1..1 (persisted as tts/rate)
     int m_ttsRun = 0;             // guards stale page-info callbacks
     bool m_ttsPendingPlay = false; // auto-advance: resume speech after the load
+
+    // Audio-file export state (active while the progress dialog is up).
+    bool m_ttsExportActive = false;
+    int m_ttsExportGen = 0; // invalidates in-flight callbacks on abort/finish
+    int m_ttsExportIndex = 0;
+    int m_ttsExportCount = 0;
+    bool m_ttsExportTranslation = false; // read the translation side
+    QByteArray m_ttsExportPcm;           // 16-bit mono at m_ttsExportRate
+    int m_ttsExportRate = 0;             // set by the first synthesized block
+    QString m_ttsExportPath;
+    QProgressDialog *m_ttsExportDialog = nullptr;
 
     // Freezes view repaints during chapter navigation (the previous chapter
     // stays on screen until the new one has finished loading — no intermediate

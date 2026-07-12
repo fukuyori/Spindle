@@ -1,7 +1,51 @@
 #include "tts/QtTtsEngine.h"
 
+#include "tts/WavUtil.h"
+
 #include <QTextToSpeech>
 #include <QVoice>
+
+namespace {
+
+// Normalize a QTextToSpeech synthesis buffer to 16-bit samples.
+QByteArray toInt16(const QAudioFormat &format, const QByteArray &raw)
+{
+    switch (format.sampleFormat()) {
+    case QAudioFormat::Int16:
+        return raw;
+    case QAudioFormat::Float: {
+        const auto *src = reinterpret_cast<const float *>(raw.constData());
+        const qsizetype n = raw.size() / 4;
+        QByteArray out(n * 2, Qt::Uninitialized);
+        auto *dst = reinterpret_cast<qint16 *>(out.data());
+        for (qsizetype i = 0; i < n; ++i)
+            dst[i] = qint16(qBound(-1.0f, src[i], 1.0f) * 32767.0f);
+        return out;
+    }
+    case QAudioFormat::Int32: {
+        const auto *src = reinterpret_cast<const qint32 *>(raw.constData());
+        const qsizetype n = raw.size() / 4;
+        QByteArray out(n * 2, Qt::Uninitialized);
+        auto *dst = reinterpret_cast<qint16 *>(out.data());
+        for (qsizetype i = 0; i < n; ++i)
+            dst[i] = qint16(src[i] >> 16);
+        return out;
+    }
+    case QAudioFormat::UInt8: {
+        const auto *src = reinterpret_cast<const quint8 *>(raw.constData());
+        const qsizetype n = raw.size();
+        QByteArray out(n * 2, Qt::Uninitialized);
+        auto *dst = reinterpret_cast<qint16 *>(out.data());
+        for (qsizetype i = 0; i < n; ++i)
+            dst[i] = qint16((int(src[i]) - 128) << 8);
+        return out;
+    }
+    default:
+        return QByteArray();
+    }
+}
+
+} // namespace
 
 QtTtsEngine::QtTtsEngine(QObject *parent)
     : TtsEngine(parent)
@@ -24,11 +68,22 @@ QtTtsEngine::QtTtsEngine(QObject *parent)
 void QtTtsEngine::hookInstance(QTextToSpeech *tts)
 {
     connect(tts, &QTextToSpeech::stateChanged, this, [this, tts](QTextToSpeech::State state) {
-        if (tts != m_active)
+        if (tts != m_active || state != QTextToSpeech::Ready)
             return;
-        if (state == QTextToSpeech::Ready && m_expectFinish) {
+        if (m_expectFinish) {
             m_expectFinish = false;
             emit utteranceFinished();
+        }
+        if (m_synthesizing) {
+            m_synthesizing = false;
+            const QByteArray int16 = toInt16(m_synthFormat, m_synthPcm);
+            m_synthPcm.clear();
+            if (int16.isEmpty()) {
+                emit errorOccurred(QStringLiteral("OS 音声の合成データを変換できません"));
+                return;
+            }
+            emit synthesized(m_synthFormat.sampleRate(),
+                             wav_util::toMono16(int16, m_synthFormat.channelCount()));
         }
     });
     connect(tts, &QTextToSpeech::errorOccurred, this,
@@ -36,6 +91,7 @@ void QtTtsEngine::hookInstance(QTextToSpeech *tts)
                 if (tts != m_active)
                     return;
                 m_expectFinish = false;
+                m_synthesizing = false;
                 emit errorOccurred(message);
             });
 }
@@ -166,6 +222,37 @@ void QtTtsEngine::resume()
 void QtTtsEngine::stop()
 {
     m_expectFinish = false;
+    m_synthesizing = false;
+    m_synthPcm.clear();
     if (m_active)
         m_active->stop();
+}
+
+bool QtTtsEngine::canSynthesize() const
+{
+    return m_active
+           && m_active->engineCapabilities().testFlag(
+               QTextToSpeech::Capability::Synthesize);
+}
+
+void QtTtsEngine::synthesize(const QString &text)
+{
+    if (!canSynthesize()) {
+        emit errorOccurred(
+            QStringLiteral("この OS 音声はファイル書き出しに対応していません（%1）")
+                .arg(m_active ? m_active->engine() : QString()));
+        return;
+    }
+    m_synthesizing = true;
+    m_synthPcm.clear();
+    // Chunked delivery; completion is the state returning to Ready (handled
+    // in hookInstance's stateChanged handler).
+    QTextToSpeech *tts = m_active;
+    m_active->synthesize(text, this,
+                         [this, tts](const QAudioFormat &format, const QByteArray &data) {
+                             if (tts != m_active || !m_synthesizing)
+                                 return;
+                             m_synthFormat = format;
+                             m_synthPcm += data;
+                         });
 }

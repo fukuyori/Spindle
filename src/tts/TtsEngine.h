@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QLocale>
 #include <QObject>
 #include <QString>
@@ -33,8 +34,20 @@ public:
     virtual void resume() = 0;
     virtual void stop() = 0;
 
+    // Offline synthesis for the audio-file export: like speak(), but instead
+    // of playing, emits synthesized() once with 16-bit mono PCM (uses the
+    // current locale/voice/rate). Failures surface via errorOccurred().
+    // Engines whose backend can't render to a buffer report false.
+    virtual bool canSynthesize() const { return false; }
+    virtual void synthesize(const QString &text)
+    {
+        Q_UNUSED(text);
+        emit errorOccurred(QStringLiteral("この音声はファイル書き出しに対応していません"));
+    }
+
 signals:
     void utteranceFinished();
+    void synthesized(int sampleRate, const QByteArray &pcm16Mono);
     void errorOccurred(const QString &message);
 };
 

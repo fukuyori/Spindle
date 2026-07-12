@@ -66,7 +66,11 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   the language, the spoken paragraph tinted and kept in view, ruby text spoken
   as its reading, and optional auto-advance to the next chapter. Speed and a
   per-language voice are configurable; play/pause/stop from the toolbar or the
-  読み上げ menu.
+  読み上げ menu. Besides the OS voices, a running
+  [VOICEVOX](https://voicevox.hiroshiba.jp) server (Japanese) and local
+  [Piper](https://github.com/rhasspy/piper) voice models (multi-language) can
+  be selected per language in 読み上げ > 音声設定. The current chapter can
+  also be exported to a WAV audio file with the same voices.
 - **XHTML source view** — toggle the current chapter between the rendered view
   and its raw markup.
 - **Comfortable reading margins** and a collapsible sidebar.
@@ -86,6 +90,7 @@ in a new window, so you can read several at once.
 | Next chapter | `Space` / `→` |
 | Previous chapter | `←` |
 | Focus search | `Cmd` / `Ctrl` + `F` |
+| Read aloud / pause | `Ctrl` + `Shift` + `S` |
 
 - **Sidebar:** toggle the left pane with **サイドバー**. Use **履歴** to show the
   recent EPUB list in that pane; opening a history item keeps the pane visible
@@ -121,6 +126,26 @@ in a new window, so you can read several at once.
   stops without producing text, Spindle saves the exact source paragraph and
   request conditions to a diagnostic file next to the EPUB.
 - **Source view:** the **XML** button shows the chapter's raw XHTML.
+- **Read-aloud:** press **▶ 読み上げ** on the toolbar (or `Ctrl+Shift+S`) to
+  speak the current chapter from the paragraph on screen; press again to
+  pause/resume, **■ 停止** to stop. The original and bilingual views read the
+  original text, the translation view reads the translation. 読み上げ →
+  章末で次の章へ進む keeps reading across chapters.
+- **Voices:** **読み上げ → 音声設定…** sets the speech rate and one voice per
+  language. OS voices work out of the box (add more in the OS language
+  settings). To use local AI voices:
+  - **VOICEVOX** (Japanese): start the VOICEVOX app/engine, press
+    音声一覧を更新, and pick a `VOICEVOX: …` speaker. Endpoint defaults to
+    `http://localhost:50021`.
+  - **Piper** (multi-language): point Piper 実行ファイル at `piper.exe` and
+    Piper 音声フォルダ at a folder of `.onnx` voice models (keep the original
+    `en_US-…`-style file names — that's how languages are detected, and keep
+    each model's `.onnx.json` next to it), then press 音声一覧を更新 and pick
+    a `Piper: …` voice.
+- **Audio-file export:** **読み上げ → 章を音声ファイルへ書き出し…** renders the
+  current chapter to a WAV file with the same voices and 原文/訳文 rule as
+  playback (progress dialog with cancel; paragraphs are joined with a short
+  pause).
 
 ### Sidecar files
 
@@ -177,6 +202,14 @@ Notes:
 Requires **Qt 6** (Widgets, Network, Xml, WebEngineWidgets, WebChannel),
 CMake ≥ 3.21, and a C++17 compiler.
 
+Optional Qt modules (the build works without them, minus the feature):
+
+- **Qt TextToSpeech** (Qt Speech) — read-aloud with OS voices. On Windows it's
+  the "Qt Speech" component in the Qt installer; on Linux install
+  `qt6-speech-dev` (runtime uses `speech-dispatcher`).
+- **Qt Multimedia** — audio playback for the local AI voices (VOICEVOX /
+  Piper) and the audio-file export.
+
 ### macOS (Homebrew)
 
 ```sh
@@ -189,8 +222,8 @@ open build/spindle.app          # or: ./build/spindle.app/Contents/MacOS/spindle
 ### Linux
 
 ```sh
-# Ubuntu / Debian:
-sudo apt-get install cmake g++ qt6-base-dev qt6-webengine-dev
+# Ubuntu / Debian (qt6-speech-dev / qt6-multimedia-dev are optional, for read-aloud):
+sudo apt-get install cmake g++ qt6-base-dev qt6-webengine-dev qt6-speech-dev qt6-multimedia-dev
 cmake -S . -B build
 cmake --build build
 ./build/spindle
@@ -255,6 +288,8 @@ src/
 ├── model/   highlight / summary models + JSON persistence
 ├── web/     epub:// scheme handler, QWebChannel bridge
 ├── net/     Ollama translation / summary client
+├── tts/     read-aloud: engine facade (OS voices / VOICEVOX / Piper),
+│            playback controller, WAV utilities
 └── ui/      main window (QWebEngineView reader + sidebar/toolbar)
 resources/   reader.js (injected), app icon, Qt resource file
 packaging/   Linux .desktop entry

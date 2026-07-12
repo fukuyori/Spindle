@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.5.0 LANGUAGES C CXX)
+project(Spindle VERSION 0.5.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,9 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Network Xml WebEngineWidgets WebCha
 # Read-aloud uses Qt TextToSpeech (OS voices) when present; without it the app
 # still builds, with the 読み上げ actions reporting no speech engine.
 find_package(Qt6 COMPONENTS TextToSpeech QUIET)
+# The local AI TTS engines (VOICEVOX / Piper) need audio output for the WAV
+# they synthesize; they are only built when Qt Multimedia is available.
+find_package(Qt6 COMPONENTS Multimedia QUIET)
 
 qt_standard_project_setup()
 
@@ -89,6 +92,8 @@ qt_add_executable(spindle
   src/tts/TtsEngine.h
   src/tts/TtsController.cpp
   src/tts/TtsController.h
+  src/tts/WavUtil.cpp
+  src/tts/WavUtil.h
   src/ui/MainWindow.cpp
   src/ui/MainWindow.h
 )
@@ -100,6 +105,22 @@ if(Qt6TextToSpeech_FOUND)
   )
   target_compile_definitions(spindle PRIVATE SPINDLE_HAS_QT_TTS)
   target_link_libraries(spindle PRIVATE Qt6::TextToSpeech)
+endif()
+
+if(Qt6Multimedia_FOUND)
+  target_sources(spindle PRIVATE
+    src/tts/WavPlayer.cpp
+    src/tts/WavPlayer.h
+    src/tts/VoicevoxEngine.cpp
+    src/tts/VoicevoxEngine.h
+    src/tts/VoicevoxEngine.h
+    src/tts/PiperEngine.cpp
+    src/tts/PiperEngine.h
+    src/tts/CompositeTtsEngine.cpp
+    src/tts/CompositeTtsEngine.h
+  )
+  target_compile_definitions(spindle PRIVATE SPINDLE_HAS_LOCAL_TTS)
+  target_link_libraries(spindle PRIVATE Qt6::Multimedia)
 endif()
 
 # This is a Widgets/WebEngine app with no QML sources. Skipping Qt's QML import

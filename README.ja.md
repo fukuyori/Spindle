@@ -55,7 +55,11 @@ Windows / macOS / Linux に対応します。
   追従スクロールし、ルビは振り仮名の読みで発音、読み上げは画面に表示中の
   段落から開始します。章末で次の章へ自動的に進むこともできます。速度と
   言語別の音声は「読み上げ > 音声設定…」で変更でき、再生 / 一時停止 / 停止は
-  ツールバーまたは「読み上げ」メニューから（Ctrl+Shift+S）。
+  ツールバーまたは「読み上げ」メニューから（Ctrl+Shift+S）。OS の音声に
+  加え、起動中の [VOICEVOX](https://voicevox.hiroshiba.jp)（日本語）や
+  ローカルの [Piper](https://github.com/rhasspy/piper) 音声モデル（多言語）も
+  言語ごとに選択できます。現在の章を **WAV 音声ファイルに書き出す**ことも
+  できます（読み上げと同じ音声・表示モードのルールで章全体を合成）。
 - **XHTML ソース表示** — 現在の章を描画表示と生マークアップで切り替え。
 - **読みやすい左右余白**と開閉できるサイドバー。
 - **複数の本を同時に** — ウィンドウに `.epub` をドロップすると、本がまだ開かれて
@@ -74,6 +78,7 @@ Windows / macOS / Linux に対応します。
 | 次の章 | `Space` / `→` |
 | 前の章 | `←` |
 | 検索にフォーカス | `Cmd` / `Ctrl` + `F` |
+| 読み上げ / 一時停止 | `Ctrl` + `Shift` + `S` |
 
 - **サイドバー**：**サイドバー** ボタンで左ペインを開閉します。**履歴** で最近開いた
   EPUB を左ペインに表示できます。履歴から本を開くと、左ペインは表示したまま目次に
@@ -107,6 +112,23 @@ Windows / macOS / Linux に対応します。
   実際に送信した段落全文とリクエスト条件を EPUB と同じフォルダの診断ファイルに保存
   します。
 - **ソース表示**：**XML** ボタンで章の生 XHTML を表示します。
+- **読み上げ**：ツールバーの **▶ 読み上げ**（または `Ctrl+Shift+S`）で、画面に
+  表示中の段落から章を読み上げます。もう一度押すと一時停止 / 再開、**■ 停止** で
+  停止。原文・対訳表示では原文を、訳文表示では訳文を読み上げます。
+  **読み上げ → 章末で次の章へ進む** をオンにすると章をまたいで読み続けます。
+- **音声の設定**：**読み上げ → 音声設定…** で速度と言語ごとの音声を設定します。
+  OS の音声はそのまま使えます（OS の言語設定から音声を追加可能）。ローカル AI
+  音声を使う場合:
+  - **VOICEVOX**（日本語）: VOICEVOX アプリ／エンジンを起動して
+    「音声一覧を更新」を押し、`VOICEVOX: …` の話者を選択。エンドポイントは
+    既定で `http://localhost:50021`。
+  - **Piper**（多言語）: 「Piper 実行ファイル」に `piper.exe`、「Piper 音声
+    フォルダ」に `.onnx` 音声モデルのフォルダを指定します（`en_US-…` 形式の
+    元のファイル名のまま置くこと — 言語はファイル名で判定されます。各モデルの
+    `.onnx.json` も同じ場所に）。「音声一覧を更新」→ `Piper: …` を選択。
+- **音声ファイルへ書き出し**：**読み上げ → 章を音声ファイルへ書き出し…** で、
+  現在の章を読み上げと同じ音声・表示モードのルールで WAV ファイルに書き出します
+  （進捗ダイアログでキャンセル可。段落間には短い間が入ります）。
 
 ### サイドカーファイル
 
@@ -163,6 +185,14 @@ Windows / macOS / Linux に対応します。
 **Qt 6**（Widgets, Network, Xml, WebEngineWidgets, WebChannel）、
 CMake 3.21 以上、C++17 コンパイラが必要です。
 
+任意の Qt モジュール（無くてもビルドできますが、該当機能が無効になります）:
+
+- **Qt TextToSpeech**（Qt Speech）— OS 音声での読み上げ。Windows は Qt
+  インストーラの「Qt Speech」コンポーネント、Linux は `qt6-speech-dev`
+  （実行時は `speech-dispatcher` を使用）。
+- **Qt Multimedia** — ローカル AI 音声（VOICEVOX / Piper）の再生と
+  音声ファイル書き出しに必要。
+
 ### macOS（Homebrew）
 
 ```sh
@@ -175,8 +205,8 @@ open build/spindle.app          # または ./build/spindle.app/Contents/MacOS/s
 ### Linux
 
 ```sh
-# Ubuntu / Debian:
-sudo apt-get install cmake g++ qt6-base-dev qt6-webengine-dev
+# Ubuntu / Debian（qt6-speech-dev / qt6-multimedia-dev は読み上げ用・任意）:
+sudo apt-get install cmake g++ qt6-base-dev qt6-webengine-dev qt6-speech-dev qt6-multimedia-dev
 cmake -S . -B build
 cmake --build build
 ./build/spindle
@@ -242,6 +272,8 @@ src/
 ├── model/   ハイライト / 要約モデル + JSON 永続化
 ├── web/     epub:// スキームハンドラ、QWebChannel ブリッジ
 ├── net/     Ollama 翻訳 / 要約クライアント
+├── tts/     読み上げ: エンジン集約（OS 音声 / VOICEVOX / Piper）、
+│            再生コントローラ、WAV ユーティリティ
 └── ui/      メインウィンドウ（QWebEngineView リーダー + サイドバー/ツールバー）
 resources/   reader.js(注入用)、アプリアイコン、Qt リソースファイル
 packaging/   Linux .desktop エントリ
