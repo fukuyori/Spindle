@@ -63,8 +63,11 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFutureWatcher>
+#include <QProcess>
 #include <QProgressBar>
 #include <QProgressDialog>
+#include <QStandardPaths>
+#include <QUuid>
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrent>
 #include <functional>
@@ -3696,11 +3699,30 @@ void MainWindow::exportChapterAudio()
                                              : m_book->title();
     QString name = base + QStringLiteral(" - ") + chapter.label;
     name.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
-    const QString path = QFileDialog::getSaveFileName(
+    QString selectedFilter;
+    QString path = QFileDialog::getSaveFileName(
         this, QStringLiteral("章を音声ファイルへ書き出し"), name + QStringLiteral(".wav"),
-        QStringLiteral("WAV 音声 (*.wav)"));
+        QStringLiteral("WAV 音声 (*.wav);;MP3 音声 (*.mp3);;M4A 音声 (*.m4a)"),
+        &selectedFilter);
     if (path.isEmpty())
         return;
+    QString ext = QFileInfo(path).suffix().toLower();
+    if (ext != QLatin1String("wav") && ext != QLatin1String("mp3")
+        && ext != QLatin1String("m4a")) {
+        // No/unknown extension typed: take it from the chosen filter.
+        ext = selectedFilter.contains(QLatin1String("*.mp3"))   ? QStringLiteral("mp3")
+              : selectedFilter.contains(QLatin1String("*.m4a")) ? QStringLiteral("m4a")
+                                                                : QStringLiteral("wav");
+        path += QLatin1Char('.') + ext;
+    }
+    if (ext != QLatin1String("wav") && ffmpegPath().isEmpty()) {
+        QMessageBox::warning(
+            this, QStringLiteral("Spindle"),
+            QStringLiteral("MP3 / M4A の書き出しには ffmpeg が必要です。\n"
+                           "ffmpeg をインストールして PATH に通すか、"
+                           "読み上げ > 音声設定… でパスを指定してください。"));
+        return;
+    }
 
     applyTtsVoiceSettings();
     m_tts->setRate(m_ttsRate);
@@ -3805,27 +3827,102 @@ void MainWindow::onTtsExportPcm(int rate, const QByteArray &pcm)
 
 void MainWindow::finishTtsExport()
 {
-    m_ttsExportActive = false;
-    ++m_ttsExportGen;
-    closeTtsExportDialog();
+    ++m_ttsExportGen; // no further block callbacks
     if (m_ttsExportPcm.isEmpty() || m_ttsExportRate <= 0) {
+        m_ttsExportActive = false;
+        closeTtsExportDialog();
         statusBar()->showMessage(QStringLiteral("書き出せる音声がありませんでした"), 5000);
         return;
     }
-    QSaveFile file(m_ttsExportPath);
-    if (!file.open(QIODevice::WriteOnly)) {
-        QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("ファイルを保存できません: %1").arg(m_ttsExportPath));
-        m_ttsExportPcm.clear();
+    m_ttsExportSeconds = qint64(m_ttsExportPcm.size()) / 2 / m_ttsExportRate;
+    const QByteArray wav = wav_util::buildWav(m_ttsExportRate, m_ttsExportPcm);
+    m_ttsExportPcm.clear();
+
+    if (QFileInfo(m_ttsExportPath).suffix().toLower() != QLatin1String("wav")) {
+        startTtsEncode(wav); // stays "active" (cancel kills ffmpeg)
         return;
     }
-    file.write(wav_util::buildWav(m_ttsExportRate, m_ttsExportPcm));
-    file.commit();
-    const qint64 seconds = qint64(m_ttsExportPcm.size()) / 2 / m_ttsExportRate;
-    m_ttsExportPcm.clear();
+    QSaveFile file(m_ttsExportPath);
+    if (!file.open(QIODevice::WriteOnly) || file.write(wav) != wav.size() || !file.commit()) {
+        m_ttsExportActive = false;
+        closeTtsExportDialog();
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             QStringLiteral("ファイルを保存できません: %1").arg(m_ttsExportPath));
+        return;
+    }
+    ttsExportDone();
+}
+
+void MainWindow::startTtsEncode(const QByteArray &wav)
+{
+    const QString ffmpeg = ffmpegPath();
+    if (ffmpeg.isEmpty()) { // pre-checked in exportChapterAudio; belt and braces
+        abortTtsExport(QStringLiteral("ffmpeg が見つかりません"));
+        return;
+    }
+    m_ttsExportTempWav = QDir::temp().filePath(
+        QStringLiteral("spindle-export-%1.wav")
+            .arg(QUuid::createUuid().toString(QUuid::Id128)));
+    QFile temp(m_ttsExportTempWav);
+    if (!temp.open(QIODevice::WriteOnly) || temp.write(wav) != wav.size()) {
+        m_ttsExportTempWav.clear();
+        abortTtsExport(QStringLiteral("一時ファイルを作成できません"));
+        return;
+    }
+    temp.close();
+
+    if (m_ttsExportDialog) {
+        m_ttsExportDialog->setLabelText(QStringLiteral("ffmpeg でエンコードしています…"));
+        m_ttsExportDialog->setRange(0, 0); // busy
+    }
+    const QString ext = QFileInfo(m_ttsExportPath).suffix().toLower();
+    QStringList args{QStringLiteral("-y"), QStringLiteral("-i"), m_ttsExportTempWav};
+    if (ext == QLatin1String("mp3"))
+        args << QStringLiteral("-codec:a") << QStringLiteral("libmp3lame")
+             << QStringLiteral("-q:a") << QStringLiteral("4"); // ~130 kbps VBR
+    else // m4a
+        args << QStringLiteral("-codec:a") << QStringLiteral("aac") << QStringLiteral("-b:a")
+             << QStringLiteral("96k") << QStringLiteral("-movflags")
+             << QStringLiteral("+faststart");
+    args << m_ttsExportPath;
+
+    m_ttsFfmpeg = new QProcess(this);
+    QProcess *proc = m_ttsFfmpeg;
+    connect(proc, &QProcess::errorOccurred, this, [this, proc](QProcess::ProcessError) {
+        if (proc != m_ttsFfmpeg)
+            return;
+        m_ttsFfmpeg = nullptr;
+        proc->deleteLater();
+        abortTtsExport(QStringLiteral("ffmpeg を起動できません: ") + proc->program());
+    });
+    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, proc](int exitCode, QProcess::ExitStatus status) {
+                if (proc != m_ttsFfmpeg)
+                    return; // aborted; abortTtsExport already cleaned up
+                m_ttsFfmpeg = nullptr;
+                proc->deleteLater();
+                QFile::remove(m_ttsExportTempWav);
+                m_ttsExportTempWav.clear();
+                if (status != QProcess::NormalExit || exitCode != 0) {
+                    const QString err =
+                        QString::fromLocal8Bit(proc->readAllStandardError()).trimmed();
+                    abortTtsExport(QStringLiteral("ffmpeg のエンコードに失敗しました")
+                                   + (err.isEmpty() ? QString()
+                                                    : QStringLiteral(":\n") + err.right(300)));
+                    return;
+                }
+                ttsExportDone();
+            });
+    proc->start(ffmpeg, args);
+}
+
+void MainWindow::ttsExportDone()
+{
+    m_ttsExportActive = false;
+    closeTtsExportDialog();
     statusBar()->showMessage(QStringLiteral("音声ファイルを書き出しました (%1:%2): %3")
-                                 .arg(seconds / 60)
-                                 .arg(seconds % 60, 2, 10, QLatin1Char('0'))
+                                 .arg(m_ttsExportSeconds / 60)
+                                 .arg(m_ttsExportSeconds % 60, 2, 10, QLatin1Char('0'))
                                  .arg(m_ttsExportPath),
                              8000);
 }
@@ -3838,6 +3935,16 @@ void MainWindow::abortTtsExport(const QString &message)
     ++m_ttsExportGen;
     if (m_tts)
         m_tts->stop();
+    if (m_ttsFfmpeg) {
+        QProcess *proc = m_ttsFfmpeg;
+        m_ttsFfmpeg = nullptr; // its finished handler becomes a no-op
+        proc->kill();
+        proc->deleteLater();
+    }
+    if (!m_ttsExportTempWav.isEmpty()) {
+        QFile::remove(m_ttsExportTempWav);
+        m_ttsExportTempWav.clear();
+    }
     m_ttsExportPcm.clear();
     closeTtsExportDialog();
     if (!message.isEmpty())
@@ -3845,6 +3952,15 @@ void MainWindow::abortTtsExport(const QString &message)
                              QStringLiteral("音声の書き出しを中止しました:\n") + message);
     else
         statusBar()->showMessage(QStringLiteral("音声の書き出しをキャンセルしました"), 3000);
+}
+
+QString MainWindow::ffmpegPath() const
+{
+    const QString configured =
+        QSettings().value(QStringLiteral("tts/ffmpegPath")).toString().trimmed();
+    if (!configured.isEmpty() && QFileInfo::exists(configured))
+        return configured;
+    return QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
 }
 
 void MainWindow::closeTtsExportDialog()
@@ -3969,7 +4085,25 @@ void MainWindow::openTtsDialog()
     });
     form->addRow(QStringLiteral("Piper 音声フォルダ"), pathRow(piperDirEdit, piperDirBrowse));
 
-    auto persistEnginePaths = [voicevoxEdit, piperExeEdit, piperDirEdit] {
+    QLineEdit *ffmpegEdit = new QLineEdit(
+        settings.value(QStringLiteral("tts/ffmpegPath")).toString(), &dialog);
+    ffmpegEdit->setPlaceholderText(QStringLiteral("未指定なら PATH から検索"));
+    QPushButton *ffmpegBrowse = new QPushButton(QStringLiteral("参照…"), &dialog);
+    connect(ffmpegBrowse, &QPushButton::clicked, this, [this, ffmpegEdit] {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("ffmpeg 実行ファイル"), ffmpegEdit->text(),
+#ifdef Q_OS_WIN
+            QStringLiteral("実行ファイル (*.exe)")
+#else
+            QString()
+#endif
+        );
+        if (!path.isEmpty())
+            ffmpegEdit->setText(path);
+    });
+    form->addRow(QStringLiteral("ffmpeg（任意）"), pathRow(ffmpegEdit, ffmpegBrowse));
+
+    auto persistEnginePaths = [voicevoxEdit, piperExeEdit, piperDirEdit, ffmpegEdit] {
         QString ep = voicevoxEdit->text().trimmed();
         while (ep.endsWith(QLatin1Char('/')))
             ep.chop(1);
@@ -3979,6 +4113,7 @@ void MainWindow::openTtsDialog()
         settings.setValue(QStringLiteral("tts/voicevoxEndpoint"), ep);
         settings.setValue(QStringLiteral("tts/piperExe"), piperExeEdit->text().trimmed());
         settings.setValue(QStringLiteral("tts/piperVoicesDir"), piperDirEdit->text().trimmed());
+        settings.setValue(QStringLiteral("tts/ffmpegPath"), ffmpegEdit->text().trimmed());
     };
     QPushButton *refreshVoices = new QPushButton(QStringLiteral("音声一覧を更新"), &dialog);
     connect(refreshVoices, &QPushButton::clicked, this,
@@ -3992,7 +4127,8 @@ void MainWindow::openTtsDialog()
     QLabel *hint = new QLabel(
         QStringLiteral("OS の音声に加え、起動中の VOICEVOX と Piper の音声モデルを選択できます"
                        "（VOICEVOX / Piper を設定したら「音声一覧を更新」）。訳文表示では訳文を、"
-                       "原文・対訳表示では原文を読み上げます。"),
+                       "原文・対訳表示では原文を読み上げます。MP3 / M4A への書き出しには "
+                       "ffmpeg を使用します。"),
         &dialog);
     hint->setWordWrap(true);
 

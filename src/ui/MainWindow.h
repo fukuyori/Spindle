@@ -32,6 +32,7 @@ class QAction;
 class QProgressBar;
 class QStackedWidget;
 class QSplitter;
+class QProcess;
 class QProgressDialog;
 class QTimer;
 class QWebEngineView;
@@ -216,12 +217,17 @@ private:
     // Audio-file export: synthesize the current chapter block by block with
     // the read-aloud voices (no playback) and save one 16-bit mono WAV.
     // Follows the same 原文/訳文 rule as playback.
+    // WAV is written directly; .mp3 / .m4a are encoded from a temp WAV via
+    // ffmpeg (tts/ffmpegPath setting, else found on PATH).
     void exportChapterAudio();
     void ttsExportNext();                                // fetch text, synthesize
     void onTtsExportPcm(int rate, const QByteArray &pcm); // one block done
     void finishTtsExport();
+    void startTtsEncode(const QByteArray &wav); // ffmpeg temp-wav -> m_ttsExportPath
+    void ttsExportDone();                       // success UI + state reset
     void abortTtsExport(const QString &message);
     void closeTtsExportDialog();
+    QString ffmpegPath() const;
 
     // Translated-EPUB export: queue-driven async translation (2 requests in
     // flight, no nested event loop; cancel keeps already-translated paragraphs).
@@ -354,7 +360,10 @@ private:
     bool m_ttsExportTranslation = false; // read the translation side
     QByteArray m_ttsExportPcm;           // 16-bit mono at m_ttsExportRate
     int m_ttsExportRate = 0;             // set by the first synthesized block
+    qint64 m_ttsExportSeconds = 0;       // total duration (for the done message)
     QString m_ttsExportPath;
+    QString m_ttsExportTempWav;          // ffmpeg input (removed afterwards)
+    QProcess *m_ttsFfmpeg = nullptr;
     QProgressDialog *m_ttsExportDialog = nullptr;
 
     // Freezes view repaints during chapter navigation (the previous chapter

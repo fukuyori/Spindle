@@ -4,17 +4,23 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
-## [0.5.1] - 2026-07-12
+## [0.5.2] - 2026-07-12
 
 ### Added
 - **Audio-file export (章を音声ファイルへ書き出し).** The 読み上げ menu can
-  render the current chapter to a single WAV file (16-bit mono) using the
-  same voices and 原文/訳文 rule as playback, with a progress dialog and
-  cancel. Blocks synthesized by different engines/sample rates (VOICEVOX
-  24 kHz, Piper 22.05 kHz, OS voices) are resampled into one stream with a
-  300 ms pause between paragraphs. OS voices are used via QTextToSpeech's
-  synthesize capability where the engine supports it; VOICEVOX and Piper
-  always support export.
+  render the current chapter to a single audio file using the same voices and
+  原文/訳文 rule as playback, with a progress dialog and cancel. Blocks
+  synthesized by different engines/sample rates (VOICEVOX 24 kHz, Piper
+  22.05 kHz, OS voices) are resampled into one stream with a 300 ms pause
+  between paragraphs. OS voices are used via QTextToSpeech's synthesize
+  capability where the engine supports it; VOICEVOX and Piper always support
+  export. WAV (16-bit mono) is written directly; **MP3 / M4A** are encoded
+  through ffmpeg (auto-detected on PATH, or set 読み上げ > 音声設定 >
+  ffmpeg) — MP3 at ~130 kbps VBR (`-q:a 4`), M4A as 96 kbps AAC.
+
+## [0.5.1] - 2026-07-12
+
+### Added
 - **Local AI voices for read-aloud: VOICEVOX and Piper.** Besides the OS
   voices, the voice pickers list the speakers of a running
   [VOICEVOX](https://voicevox.hiroshiba.jp) server (`VOICEVOX: 四国めたん
@@ -513,6 +519,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.5.2]: https://github.com/fukuyori/Spindle/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/fukuyori/Spindle/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/fukuyori/Spindle/compare/v0.4.5...v0.5.0
 [0.4.5]: https://github.com/fukuyori/Spindle/compare/v0.4.4...v0.4.5

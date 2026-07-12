@@ -143,9 +143,11 @@ in a new window, so you can read several at once.
     each model's `.onnx.json` next to it), then press 音声一覧を更新 and pick
     a `Piper: …` voice.
 - **Audio-file export:** **読み上げ → 章を音声ファイルへ書き出し…** renders the
-  current chapter to a WAV file with the same voices and 原文/訳文 rule as
+  current chapter to an audio file with the same voices and 原文/訳文 rule as
   playback (progress dialog with cancel; paragraphs are joined with a short
-  pause).
+  pause). WAV needs nothing extra; choosing **MP3 / M4A** encodes through
+  [ffmpeg](https://ffmpeg.org) — installed on PATH or pointed to in
+  読み上げ > 音声設定.
 
 ### Sidecar files
 
