@@ -4,6 +4,14 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-07-14
+
+### Fixed
+- **Glossary extraction no longer times out when a model keeps generating
+  malformed JSON.** Responses now use a strict schema and a bounded output
+  length, so a runaway model cannot occupy Ollama until the five-minute
+  request timeout.
+
 ## [0.6.0] - 2026-07-14
 
 ### Added
@@ -531,6 +539,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.6.1]: https://github.com/fukuyori/Spindle/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/fukuyori/Spindle/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/fukuyori/Spindle/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/fukuyori/Spindle/compare/v0.5.0...v0.5.1

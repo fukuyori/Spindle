@@ -17,6 +17,12 @@ namespace {
 // models while still surfacing a hung server instead of waiting forever.
 constexpr int kTransferTimeoutMs = 300'000;
 
+// A glossary reply contains at most 20 short entries. Without an explicit
+// generation limit, a model that fails to close the JSON can keep producing
+// tokens until the request-level timeout expires (and block the next queued
+// request on single-slot Ollama servers).
+constexpr int kGlossaryMaxPredictTokens = 2048;
+
 QString shortResponseForMessage(const QByteArray &bytes)
 {
     QString text = QString::fromUtf8(bytes).trimmed();
@@ -278,9 +284,31 @@ void OllamaClient::extractGlossary(const QString &endpoint, const QString &model
     body[QStringLiteral("model")] = model;
     body[QStringLiteral("stream")] = false;
     body[QStringLiteral("think")] = false;
-    body[QStringLiteral("format")] = QStringLiteral("json");
+    const QJsonObject entrySchema{
+        {QStringLiteral("type"), QStringLiteral("object")},
+        {QStringLiteral("properties"),
+         QJsonObject{{QStringLiteral("src"),
+                      QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}},
+                     {QStringLiteral("dst"),
+                      QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}},
+                     {QStringLiteral("note"),
+                      QJsonObject{{QStringLiteral("type"), QStringLiteral("string")}}}}},
+        {QStringLiteral("required"),
+         QJsonArray{QStringLiteral("src"), QStringLiteral("dst"), QStringLiteral("note")}},
+        {QStringLiteral("additionalProperties"), false}};
+    body[QStringLiteral("format")] =
+        QJsonObject{{QStringLiteral("type"), QStringLiteral("object")},
+                    {QStringLiteral("properties"),
+                     QJsonObject{{QStringLiteral("entries"),
+                                  QJsonObject{{QStringLiteral("type"),
+                                               QStringLiteral("array")},
+                                              {QStringLiteral("items"), entrySchema},
+                                              {QStringLiteral("maxItems"), 20}}}}},
+                    {QStringLiteral("required"), QJsonArray{QStringLiteral("entries")}},
+                    {QStringLiteral("additionalProperties"), false}};
     QJsonObject options;
-    options[QStringLiteral("temperature")] = 0.1;
+    options[QStringLiteral("temperature")] = 0.0;
+    options[QStringLiteral("num_predict")] = kGlossaryMaxPredictTokens;
     body[QStringLiteral("options")] = options;
     QJsonArray messages;
     messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
@@ -301,6 +329,15 @@ void OllamaClient::extractGlossary(const QString &endpoint, const QString &model
             emit finished(requestId, false,
                           QStringLiteral("Ollama への接続に失敗しました (%1): %2")
                               .arg(url.toString(), ollamaErrorDetail(bytes, reply)));
+            return;
+        }
+        const QJsonObject root = QJsonDocument::fromJson(bytes).object();
+        if (root.value(QStringLiteral("done_reason")).toString()
+            == QLatin1String("length")) {
+            emit finished(
+                requestId, false,
+                QStringLiteral("Ollama の用語リストが出力上限に達しました。"
+                               "要約モデルを変更して再実行してください"));
             return;
         }
         bool ok = false;
