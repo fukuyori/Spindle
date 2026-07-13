@@ -25,6 +25,12 @@ public:
     void summarize(const QString &endpoint, const QString &model, const QString &targetLang,
                    const QString &text, const QString &detailInstruction = QString(),
                    const QString &glossary = QString(), int requestId = 0);
+    // Extract translation-glossary candidates (proper nouns, recurring terms)
+    // from `text`, translated into `targetLang`. Ollama is asked for JSON
+    // output ("format":"json"); the result is the raw JSON string
+    // {"entries":[{"src","dst","note"}]} — the caller parses and validates.
+    void extractGlossary(const QString &endpoint, const QString &model,
+                         const QString &targetLang, const QString &text, int requestId = 0);
 
 signals:
     void finished(int requestId, bool ok, const QString &result);

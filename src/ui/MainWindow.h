@@ -12,6 +12,7 @@
 #include <QLocale>
 #include <QMainWindow>
 #include <QPair>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -94,6 +95,7 @@ private slots:
     void onOllamaFinished(int requestId, bool ok, const QString &result);
     void onSelectionTranslated(int requestId, bool ok, const QString &result);
     void onSummaryFinished(int requestId, bool ok, const QString &result);
+    void onGlossaryExtractFinished(int requestId, bool ok, const QString &result);
     void onMarkClicked(const QString &id);
     void exportHighlightsMarkdown();
     void exportHighlightsJson();
@@ -199,6 +201,15 @@ private:
     void translateCurrentSummary();
     void showTranslatePopup(const QString &text);
     void showSummaryDialog(const QString &title, const QString &text);
+
+    // Glossary generation: extract proper nouns / recurring terms with Ollama
+    // (chunked, 2 requests in flight) and merge them into <book>.glossary.json.
+    // Cancel keeps the terms found so far.
+    void generateGlossary();
+    void glossaryExtractNext();
+    void cancelGlossaryGenerate();
+    void closeGlossaryDialog();
+    void finishGlossaryGenerate(const QString &error); // ""=completed normally
 
     // Read-aloud (読み上げ): TTS of the current chapter, block by block,
     // following the translation display mode (原文 / 対訳 / 訳文). Block text
@@ -340,6 +351,22 @@ private:
     int m_exportDone = 0;
     int m_exportMode = 0; // 0 bilingual, 1 translation-only
     bool m_exportActive = false;
+
+    // Glossary-generation state (active while the progress dialog is up).
+    OllamaClient *m_glossaryOllama = nullptr;
+    QDialog *m_glossaryDialog = nullptr;
+    QProgressBar *m_glossaryBar = nullptr;
+    QStringList m_glossaryQueue;        // text chunks still to scan
+    QHash<int, QString> m_glossaryReqs; // requestId -> chunk (validates src terms)
+    int m_glossaryReqSeq = 0;
+    int m_glossaryCursor = 0;
+    int m_glossaryInFlight = 0;
+    int m_glossaryDone = 0;
+    bool m_glossaryActive = false;
+    QVector<Glossary::Entry> m_glossaryExisting; // file entries kept as-is
+    QVector<Glossary::Entry> m_glossaryFound;    // new entries from this run
+    QSet<QString> m_glossaryKeys; // case-folded srcs of existing + found
+    QString m_glossarySourceLang;
 
     // Read-aloud state (created lazily in ensureTts).
     TtsEngine *m_tts = nullptr;

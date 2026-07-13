@@ -55,7 +55,10 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Translation glossary** — an optional `<book>.glossary.json` fixes the
   target wording of chosen terms (names, jargon) for consistent translations
   and summaries. Only entries that appear in the current text are sent to the
-  model.
+  model. 翻訳 > 用語集を生成… builds the file automatically: Ollama extracts
+  proper nouns and recurring terms from the current chapter or the whole book
+  and proposes target wordings, merged into the existing glossary (existing
+  entries are kept).
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
   from the cache (missing paragraphs are translated on export); the output's
   language metadata is set to the target language.
@@ -159,13 +162,14 @@ For a book `Foo.epub`, files are named after the base name `Foo`:
 |------|----------|
 | `<book>.highlights.json` | highlights & notes |
 | `<book>.<lang>.json` | translation cache for a target language (e.g. `Foo.ja.json`) |
-| `<book>.glossary.json` | optional glossary (you create/edit this) |
+| `<book>.glossary.json` | optional glossary (hand-written, or generated via 翻訳 > 用語集を生成…) |
 | `<book>.summaries.json` | saved chapter summaries |
 
 #### Glossary format
 
 Create `<book>.glossary.json` next to the book (for `Changeling.epub`, the
-file is `Changeling.glossary.json`). One file holds a single
+file is `Changeling.glossary.json`), or let 翻訳 > 用語集を生成… generate it
+from the text. One file holds a single
 source→target language pair and fixes how chosen terms are translated:
 
 ```json

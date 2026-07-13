@@ -728,6 +728,8 @@ void MainWindow::buildUi()
     QMenu *trMenu = menuBar()->addMenu(QStringLiteral("翻訳"));
     trMenu->addAction(QStringLiteral("設定…"), this, &MainWindow::openTranslateDialog);
     trMenu->addSeparator();
+    trMenu->addAction(QStringLiteral("用語集を生成…"), this, &MainWindow::generateGlossary);
+    trMenu->addSeparator();
     trMenu->addAction(QStringLiteral("対訳 EPUB を書き出し…"), this,
                       [this] { exportTranslatedEpub(0); });
     trMenu->addAction(QStringLiteral("訳文 EPUB を書き出し…"), this,
@@ -844,6 +846,7 @@ void MainWindow::buildUi()
     aiButton->setPopupMode(QToolButton::InstantPopup);
     QMenu *aiMenu = new QMenu(aiButton);
     aiMenu->addAction(QStringLiteral("翻訳設定…"), this, &MainWindow::openTranslateDialog);
+    aiMenu->addAction(QStringLiteral("用語集を生成…"), this, &MainWindow::generateGlossary);
     aiMenu->addAction(QStringLiteral("現在の章を要約"), this, &MainWindow::summarizeCurrentChapter);
     aiMenu->addAction(QStringLiteral("要約設定…"), this, &MainWindow::openSummarySettingsDialog);
     aiButton->setMenu(aiMenu);
@@ -3054,6 +3057,331 @@ void MainWindow::showTranslatePopup(const QString &text)
     m_translatePopup->move(QCursor::pos() + QPoint(8, 14));
     m_translatePopup->show();
     m_translatePopup->setFocus(); // ensure it receives the Escape key
+}
+
+// --- glossary generation ----------------------------------------------------
+
+// Split chapter text into extraction-sized chunks, cutting at a sentence end
+// or space near the limit so a term isn't torn apart mid-word. normalizedBody
+// has all whitespace collapsed to single spaces, so there are no newlines.
+static QStringList splitForGlossary(const QString &text, qsizetype maxChars = 24000)
+{
+    static const QString kBreaks = QStringLiteral("。．！？!?. ");
+    QStringList chunks;
+    QString rest = text.trimmed();
+    while (rest.size() > maxChars) {
+        qsizetype cut = -1;
+        for (qsizetype i = maxChars - 1; i > maxChars / 2; --i) {
+            if (kBreaks.contains(rest.at(i))) {
+                cut = i + 1;
+                break;
+            }
+        }
+        if (cut <= 0)
+            cut = maxChars;
+        const QString chunk = rest.left(cut).trimmed();
+        if (!chunk.isEmpty())
+            chunks << chunk;
+        rest = rest.mid(cut).trimmed();
+    }
+    if (!rest.isEmpty())
+        chunks << rest;
+    return chunks;
+}
+
+// Parse the model's {"entries":[{"src","dst","note"}]} reply. JSON mode makes
+// fences unlikely but not impossible, so anything before the first brace or
+// bracket (and after the matching last one) is stripped first.
+static QVector<Glossary::Entry> parseGlossaryEntries(const QString &content)
+{
+    QString s = content.trimmed();
+    const qsizetype brace = s.indexOf(QLatin1Char('{'));
+    const qsizetype bracket = s.indexOf(QLatin1Char('['));
+    qsizetype start = brace;
+    if (bracket >= 0 && (start < 0 || bracket < start))
+        start = bracket;
+    if (start > 0)
+        s = s.mid(start);
+    const QChar close = s.startsWith(QLatin1Char('[')) ? QLatin1Char(']') : QLatin1Char('}');
+    const qsizetype end = s.lastIndexOf(close);
+    if (end >= 0)
+        s = s.left(end + 1);
+
+    const QJsonDocument doc = QJsonDocument::fromJson(s.toUtf8());
+    QJsonArray arr;
+    if (doc.isObject())
+        arr = doc.object().value(QStringLiteral("entries")).toArray();
+    else if (doc.isArray())
+        arr = doc.array();
+
+    QVector<Glossary::Entry> entries;
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        Glossary::Entry e;
+        e.source = o.value(QStringLiteral("src")).toString().trimmed();
+        if (e.source.isEmpty())
+            e.source = o.value(QStringLiteral("source")).toString().trimmed();
+        e.target = o.value(QStringLiteral("dst")).toString().trimmed();
+        if (e.target.isEmpty())
+            e.target = o.value(QStringLiteral("target")).toString().trimmed();
+        e.note = o.value(QStringLiteral("note")).toString().trimmed();
+        if (!e.source.isEmpty() && !e.target.isEmpty())
+            entries.append(e);
+    }
+    return entries;
+}
+
+void MainWindow::generateGlossary()
+{
+    if (!m_book || m_epubPath.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("先に EPUB を開いてください。"));
+        return;
+    }
+    if (m_glossaryActive) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("用語集の生成を実行中です。"));
+        return;
+    }
+    if (isBookLanguage(m_trTarget)) {
+        QMessageBox::information(
+            this, QStringLiteral("Spindle"),
+            QStringLiteral("この本は既に翻訳先言語（%1）で書かれているため、翻訳用の"
+                           "用語集は生成できません。翻訳 > 設定… で翻訳先言語を変更して"
+                           "ください。")
+                .arg(targetLanguageName(m_trTarget)));
+        return;
+    }
+
+    // The sidecar holds one source→target pair: same-target entries are kept
+    // and extended; a different pair can only be replaced wholesale.
+    QString fileTarget;
+    QVector<Glossary::Entry> existing = Glossary::readFile(m_epubPath, nullptr, &fileTarget);
+    if (!existing.isEmpty() && !fileTarget.isEmpty() && fileTarget != m_trTarget) {
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("Spindle"),
+            QStringLiteral("既存の用語集は %1 向けです。%2 向けに作り直しますか？\n"
+                           "（既存の内容は置き換えられます）")
+                .arg(targetLanguageName(fileTarget), targetLanguageName(m_trTarget)));
+        if (answer != QMessageBox::Yes)
+            return;
+        existing.clear();
+    }
+
+    QMessageBox scopeBox(this);
+    scopeBox.setWindowTitle(QStringLiteral("用語集を生成 (Ollama)"));
+    scopeBox.setText(QStringLiteral("本文から固有名詞や繰り返し使われる用語を抽出し、"
+                                    "%1 への訳語を %2 に追記します。\n"
+                                    "どの範囲から生成しますか？")
+                         .arg(targetLanguageName(m_trTarget),
+                              QFileInfo(Glossary::filePathFor(m_epubPath)).fileName()));
+    QPushButton *chapterButton =
+        m_currentChapter >= 0
+            ? scopeBox.addButton(QStringLiteral("現在の章"), QMessageBox::AcceptRole)
+            : nullptr;
+    QPushButton *bookButton = scopeBox.addButton(QStringLiteral("本全体"),
+                                                 QMessageBox::AcceptRole);
+    scopeBox.addButton(QMessageBox::Cancel);
+    scopeBox.exec();
+    const QAbstractButton *clicked = scopeBox.clickedButton();
+    if (!clicked || (clicked != chapterButton && clicked != bookButton))
+        return;
+
+    ensureChapterTexts();
+    QStringList chunks;
+    if (clicked == chapterButton) {
+        const QString chapterPath = m_book->chapters().at(m_currentChapter).path;
+        for (const ChapterText &chapter : m_chapterTexts) {
+            if (chapter.path == chapterPath) {
+                chunks = splitForGlossary(chapter.normalizedBody);
+                break;
+            }
+        }
+    } else {
+        for (const ChapterText &chapter : m_chapterTexts)
+            chunks += splitForGlossary(chapter.normalizedBody);
+    }
+    if (chunks.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 QStringLiteral("抽出できる本文がありません。"));
+        return;
+    }
+
+    m_glossaryActive = true;
+    m_glossaryQueue = chunks;
+    m_glossaryCursor = 0;
+    m_glossaryInFlight = 0;
+    m_glossaryDone = 0;
+    m_glossaryReqs.clear();
+    m_glossaryExisting = existing;
+    m_glossaryFound.clear();
+    m_glossaryKeys.clear();
+    for (const Glossary::Entry &e : existing)
+        m_glossaryKeys.insert(e.source.toCaseFolded());
+    m_glossarySourceLang = primaryLangSubtag(m_book->language());
+
+    if (!m_glossaryOllama) {
+        m_glossaryOllama = new OllamaClient(this);
+        connect(m_glossaryOllama, &OllamaClient::finished, this,
+                &MainWindow::onGlossaryExtractFinished);
+    }
+
+    // Signal-driven progress dialog like 翻訳エクスポート: requests run
+    // kTranslateConcurrency at a time; cancel keeps the terms found so far.
+    // Extraction needs an instruction-following model, so the summary model
+    // (falls back to the translation model) is used — translation-tuned
+    // models can't produce the JSON term list.
+    m_glossaryDialog = new QDialog(this);
+    m_glossaryDialog->setWindowTitle(QStringLiteral("用語集を生成"));
+    m_glossaryDialog->setWindowModality(Qt::WindowModal);
+    QVBoxLayout *layout = new QVBoxLayout(m_glossaryDialog);
+    QLabel *label = new QLabel(QStringLiteral("用語を抽出しています（%1 へ: %2）…")
+                                   .arg(targetLanguageName(m_trTarget), effectiveSummaryModel()),
+                               m_glossaryDialog);
+    label->setWordWrap(true);
+    m_glossaryBar = new QProgressBar(m_glossaryDialog);
+    m_glossaryBar->setRange(0, m_glossaryQueue.size());
+    m_glossaryBar->setValue(0);
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, m_glossaryDialog);
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
+    connect(buttons, &QDialogButtonBox::rejected, m_glossaryDialog, &QDialog::reject);
+    connect(m_glossaryDialog, &QDialog::rejected, this, &MainWindow::cancelGlossaryGenerate);
+    layout->addWidget(label);
+    layout->addWidget(m_glossaryBar);
+    layout->addWidget(buttons);
+    m_glossaryDialog->show();
+
+    glossaryExtractNext();
+}
+
+void MainWindow::glossaryExtractNext()
+{
+    if (!m_glossaryActive)
+        return;
+    while (m_glossaryInFlight < kTranslateConcurrency
+           && m_glossaryCursor < m_glossaryQueue.size()) {
+        const QString chunk = m_glossaryQueue.at(m_glossaryCursor);
+        ++m_glossaryCursor;
+        const int reqId = ++m_glossaryReqSeq;
+        m_glossaryReqs.insert(reqId, chunk);
+        ++m_glossaryInFlight;
+        m_glossaryOllama->extractGlossary(m_trEndpoint, effectiveSummaryModel(),
+                                          targetLanguagePrompt(m_trTarget), chunk, reqId);
+    }
+}
+
+void MainWindow::onGlossaryExtractFinished(int requestId, bool ok, const QString &result)
+{
+    const auto it = m_glossaryReqs.find(requestId);
+    if (it == m_glossaryReqs.end())
+        return; // canceled
+    const QString chunk = it.value();
+    m_glossaryReqs.erase(it);
+    if (!m_glossaryActive)
+        return;
+    --m_glossaryInFlight;
+
+    if (!ok) {
+        m_glossaryActive = false;
+        m_glossaryQueue.clear();
+        m_glossaryReqs.clear();
+        m_glossaryInFlight = 0;
+        finishGlossaryGenerate(result); // saves the terms found before the failure
+        return;
+    }
+
+    // Keep only entries whose source really occurs in the scanned chunk — JSON
+    // mode still hallucinates the occasional term, and a glossary line that
+    // never matches any text would just bloat every prompt. An entry whose
+    // translation equals its source adds nothing either.
+    const QVector<Glossary::Entry> entries = parseGlossaryEntries(result);
+    for (const Glossary::Entry &e : entries) {
+        if (e.source.compare(e.target, Qt::CaseInsensitive) == 0)
+            continue;
+        if (!Glossary::appearsInText(e.source, chunk))
+            continue;
+        const QString key = e.source.toCaseFolded();
+        if (m_glossaryKeys.contains(key))
+            continue;
+        m_glossaryKeys.insert(key);
+        m_glossaryFound.append(e);
+    }
+
+    ++m_glossaryDone;
+    if (m_glossaryBar)
+        m_glossaryBar->setValue(m_glossaryDone);
+
+    if (m_glossaryCursor >= m_glossaryQueue.size() && m_glossaryInFlight == 0) {
+        m_glossaryActive = false;
+        m_glossaryQueue.clear();
+        finishGlossaryGenerate(QString());
+        return;
+    }
+    glossaryExtractNext();
+}
+
+void MainWindow::cancelGlossaryGenerate()
+{
+    if (!m_glossaryActive)
+        return;
+    m_glossaryActive = false;
+    m_glossaryQueue.clear();
+    m_glossaryReqs.clear(); // in-flight replies become no-ops
+    m_glossaryInFlight = 0;
+    if (m_glossaryFound.isEmpty()) {
+        m_glossaryExisting.clear();
+        m_glossaryKeys.clear();
+        closeGlossaryDialog();
+        return;
+    }
+    finishGlossaryGenerate(QString()); // keep and save the terms found so far
+}
+
+void MainWindow::closeGlossaryDialog()
+{
+    if (m_glossaryDialog) {
+        m_glossaryDialog->hide();
+        m_glossaryDialog->deleteLater();
+        m_glossaryDialog = nullptr;
+        m_glossaryBar = nullptr;
+    }
+}
+
+void MainWindow::finishGlossaryGenerate(const QString &error)
+{
+    closeGlossaryDialog();
+
+    const int added = m_glossaryFound.size();
+    QString saveError;
+    bool saved = false;
+    if (added > 0) {
+        saved = Glossary::writeFile(m_epubPath, m_glossarySourceLang, m_trTarget,
+                                    m_glossaryExisting + m_glossaryFound, &saveError);
+        if (saved)
+            m_trGlossary.load(m_epubPath, m_trTarget); // apply immediately
+    }
+    const int total = m_glossaryExisting.size() + added;
+    m_glossaryExisting.clear();
+    m_glossaryFound.clear();
+    m_glossaryKeys.clear();
+
+    QStringList lines;
+    if (!error.isEmpty())
+        lines << QStringLiteral("用語の抽出に失敗しました: %1").arg(error);
+    if (saved) {
+        lines << QStringLiteral("用語集に %1 件を追加しました（合計 %2 件）。")
+                     .arg(added)
+                     .arg(total);
+        lines << Glossary::filePathFor(m_epubPath);
+    } else if (added > 0) {
+        lines << QStringLiteral("用語集を保存できませんでした: %1").arg(saveError);
+    } else if (error.isEmpty()) {
+        lines << QStringLiteral("新しい用語は見つかりませんでした。");
+    }
+    if (error.isEmpty() && (saved || added == 0))
+        QMessageBox::information(this, QStringLiteral("Spindle"), lines.join(QLatin1Char('\n')));
+    else
+        QMessageBox::warning(this, QStringLiteral("Spindle"), lines.join(QLatin1Char('\n')));
 }
 
 void MainWindow::openSummarySettingsDialog()

@@ -243,6 +243,73 @@ void OllamaClient::translateAttempt(const QString &endpoint, const QString &mode
     });
 }
 
+void OllamaClient::extractGlossary(const QString &endpoint, const QString &model,
+                                   const QString &targetLang, const QString &text,
+                                   int requestId)
+{
+    QString base = endpoint.trimmed();
+    while (base.endsWith(QLatin1Char('/')))
+        base.chop(1);
+    const QUrl url(base + QStringLiteral("/api/chat"));
+
+    const QString target = targetLang.trimmed().isEmpty()
+                               ? QStringLiteral("the requested target language")
+                               : targetLang.trimmed();
+    const QString system =
+        QStringLiteral(
+            "You are a terminology extractor preparing a translation glossary. From the "
+            "user's text, list the proper nouns and recurring special terms (person names, "
+            "place names, organizations, titles of works, jargon) whose rendering must stay "
+            "consistent throughout a book. Skip ordinary vocabulary. Reply with JSON only, "
+            "in exactly this shape: "
+            "{\"entries\":[{\"src\":\"term exactly as written in the text\","
+            "\"dst\":\"its translation into %1\",\"note\":\"short category such as "
+            "person / place / organization / term\"}]}. "
+            "Copy \"src\" verbatim from the text. Write \"dst\" only in %1. "
+            "List at most 20 of the most important terms; reply {\"entries\":[]} "
+            "when there are none.")
+            .arg(target);
+    const QString user =
+        QStringLiteral("Extract glossary terms from the following text. Reply with JSON "
+                       "only:\n\n%1")
+            .arg(text);
+
+    QJsonObject body;
+    body[QStringLiteral("model")] = model;
+    body[QStringLiteral("stream")] = false;
+    body[QStringLiteral("think")] = false;
+    body[QStringLiteral("format")] = QStringLiteral("json");
+    QJsonObject options;
+    options[QStringLiteral("temperature")] = 0.1;
+    body[QStringLiteral("options")] = options;
+    QJsonArray messages;
+    messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
+                                {QStringLiteral("content"), system}});
+    messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
+                                {QStringLiteral("content"), user}});
+    body[QStringLiteral("messages")] = messages;
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setTransferTimeout(kTransferTimeoutMs);
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url, requestId]() {
+        reply->deleteLater();
+        const QByteArray bytes = reply->readAll();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit finished(requestId, false,
+                          QStringLiteral("Ollama への接続に失敗しました (%1): %2")
+                              .arg(url.toString(), ollamaErrorDetail(bytes, reply)));
+            return;
+        }
+        bool ok = false;
+        const QString result = extractOllamaContent(
+            bytes, QStringLiteral("Ollama が空の用語リストを返しました"), &ok);
+        emit finished(requestId, ok, result);
+    });
+}
+
 void OllamaClient::summarize(const QString &endpoint, const QString &model,
                              const QString &targetLang, const QString &text,
                              const QString &detailInstruction, const QString &glossary,

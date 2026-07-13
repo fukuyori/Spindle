@@ -28,7 +28,9 @@ bool isWordish(QChar c)
     return c.isLetterOrNumber() || c == QLatin1Char('_');
 }
 
-bool sourceAppearsInText(const QString &source, const QString &text)
+} // namespace
+
+bool Glossary::appearsInText(const QString &source, const QString &text)
 {
     if (source.isEmpty() || text.isEmpty())
         return false;
@@ -44,28 +46,34 @@ bool sourceAppearsInText(const QString &source, const QString &text)
     return re.match(text).hasMatch();
 }
 
-} // namespace
-
-void Glossary::load(const QString &epubPath, const QString &lang)
+QString Glossary::filePathFor(const QString &epubPath)
 {
-    m_entries.clear();
-    if (epubPath.isEmpty() || lang.isEmpty())
-        return;
-
     QString base = epubPath; // <book>.glossary.json  (e.g. book.epub -> book.glossary.json)
     if (base.endsWith(QLatin1String(".epub"), Qt::CaseInsensitive))
         base.chop(5);
-    QFile f(base + QStringLiteral(".glossary.json"));
+    return base + QStringLiteral(".glossary.json");
+}
+
+QVector<Glossary::Entry> Glossary::readFile(const QString &epubPath, QString *sourceLang,
+                                            QString *targetLang)
+{
+    if (sourceLang)
+        sourceLang->clear();
+    if (targetLang)
+        targetLang->clear();
+
+    QVector<Entry> entries;
+    if (epubPath.isEmpty())
+        return entries;
+    QFile f(filePathFor(epubPath));
     if (!f.open(QIODevice::ReadOnly))
-        return;
+        return entries;
     const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
 
-    // The file is for one source→target pair. Only apply it when its target
-    // language matches the language we're translating into (a missing
-    // target_lang is treated as "applies to any target").
-    const QString fileTarget = root.value(QStringLiteral("target_lang")).toString().trimmed();
-    if (!fileTarget.isEmpty() && fileTarget != lang)
-        return;
+    if (sourceLang)
+        *sourceLang = root.value(QStringLiteral("source_lang")).toString().trimmed();
+    if (targetLang)
+        *targetLang = root.value(QStringLiteral("target_lang")).toString().trimmed();
 
     const QJsonArray arr = root.value(QStringLiteral("entries")).toArray();
     for (const QJsonValue &v : arr) {
@@ -75,8 +83,61 @@ void Glossary::load(const QString &epubPath, const QString &lang)
         e.target = o.value(QStringLiteral("dst")).toString().trimmed();
         e.note = o.value(QStringLiteral("note")).toString();
         if (!e.source.isEmpty() && !e.target.isEmpty())
-            m_entries.append(e);
+            entries.append(e);
     }
+    return entries;
+}
+
+bool Glossary::writeFile(const QString &epubPath, const QString &sourceLang,
+                         const QString &targetLang, const QVector<Entry> &entries,
+                         QString *error)
+{
+    QJsonArray arr;
+    for (const Entry &e : entries) {
+        QJsonObject o;
+        o[QStringLiteral("src")] = e.source;
+        o[QStringLiteral("dst")] = e.target;
+        if (!e.note.isEmpty())
+            o[QStringLiteral("note")] = e.note;
+        arr.append(o);
+    }
+    QJsonObject root;
+    if (!sourceLang.isEmpty())
+        root[QStringLiteral("source_lang")] = sourceLang;
+    if (!targetLang.isEmpty())
+        root[QStringLiteral("target_lang")] = targetLang;
+    root[QStringLiteral("entries")] = arr;
+
+    QFile f(filePathFor(epubPath));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (error)
+            *error = f.errorString();
+        return false;
+    }
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    f.close();
+    if (f.error() != QFile::NoError) {
+        if (error)
+            *error = f.errorString();
+        return false;
+    }
+    return true;
+}
+
+void Glossary::load(const QString &epubPath, const QString &lang)
+{
+    m_entries.clear();
+    if (epubPath.isEmpty() || lang.isEmpty())
+        return;
+
+    // The file is for one source→target pair. Only apply it when its target
+    // language matches the language we're translating into (a missing
+    // target_lang is treated as "applies to any target").
+    QString fileTarget;
+    const QVector<Entry> entries = readFile(epubPath, nullptr, &fileTarget);
+    if (!fileTarget.isEmpty() && fileTarget != lang)
+        return;
+    m_entries = entries;
 }
 
 QString Glossary::promptBlock() const
@@ -89,7 +150,7 @@ QString Glossary::promptBlockForText(const QString &text) const
     QVector<Entry> matched;
     matched.reserve(m_entries.size());
     for (const Entry &e : m_entries) {
-        if (sourceAppearsInText(e.source, text))
+        if (appearsInText(e.source, text))
             matched.append(e);
     }
     return promptBlockFromEntries(matched);

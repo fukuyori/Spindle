@@ -4,6 +4,18 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-07-14
+
+### Added
+- **Glossary generation (用語集を生成).** 翻訳 > 用語集を生成… extracts proper
+  nouns and recurring terms from the current chapter or the whole book with
+  Ollama (JSON-forced output, summary model) and writes their target-language
+  wordings into `<book>.glossary.json`, merging with any existing entries
+  (existing ones win). Extracted terms are kept only if they actually occur in
+  the scanned text; progress dialog with cancel (cancel keeps the terms found
+  so far), and the updated glossary applies to translations and summaries
+  immediately.
+
 ## [0.5.2] - 2026-07-12
 
 ### Added
@@ -519,6 +531,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.6.0]: https://github.com/fukuyori/Spindle/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/fukuyori/Spindle/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/fukuyori/Spindle/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/fukuyori/Spindle/compare/v0.4.5...v0.5.0
