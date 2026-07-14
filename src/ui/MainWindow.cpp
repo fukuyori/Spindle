@@ -85,6 +85,7 @@
 #include <QStyledItemDelegate>
 #include <QStringList>
 #include <QSlider>
+#include <QSpinBox>
 #include <QTimer>
 #include <QStyle>
 #include <QToolBar>
@@ -668,6 +669,49 @@ void MainWindow::openAppearanceDialog()
         persistAll(); // flush a pending batched write before the dialog goes away
 }
 
+void MainWindow::openWrapSettingsDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("折り返し設定"));
+    QFormLayout *form = new QFormLayout(&dialog);
+
+    QComboBox *modeBox = new QComboBox(&dialog);
+    modeBox->addItem(QStringLiteral("ウインドウの幅"),
+                     static_cast<int>(WrapMode::WindowWidth));
+    modeBox->addItem(QStringLiteral("指定した文字数"),
+                     static_cast<int>(WrapMode::CharacterCount));
+    modeBox->setCurrentIndex(modeBox->findData(static_cast<int>(m_wrapMode)));
+    form->addRow(QStringLiteral("折り返し幅"), modeBox);
+
+    QSpinBox *characters = new QSpinBox(&dialog);
+    characters->setRange(10, 120);
+    characters->setSuffix(QStringLiteral(" 文字"));
+    characters->setValue(m_wrapCharacters);
+    characters->setEnabled(m_wrapMode == WrapMode::CharacterCount);
+    characters->setToolTip(QStringLiteral("全角文字を基準にした1行の最大文字数"));
+    form->addRow(QStringLiteral("1行の文字数"), characters);
+    connect(modeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), characters,
+            [=](int) {
+                characters->setEnabled(modeBox->currentData().toInt()
+                                       == static_cast<int>(WrapMode::CharacterCount));
+            });
+
+    QDialogButtonBox *buttons =
+        new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    m_wrapMode = static_cast<WrapMode>(modeBox->currentData().toInt());
+    m_wrapCharacters = characters->value();
+    QSettings settings;
+    settings.setValue(QStringLiteral("view/wrapMode"), static_cast<int>(m_wrapMode));
+    settings.setValue(QStringLiteral("view/wrapCharacters"), m_wrapCharacters);
+    injectViewStyle();
+}
+
 void MainWindow::buildUi()
 {
     menuBar()->setNativeMenuBar(true);
@@ -718,6 +762,8 @@ void MainWindow::buildUi()
     }
     viewMenu->addAction(QStringLiteral("明るさ調整…"), this, &MainWindow::openAppearanceDialog);
     viewMenu->addSeparator();
+    viewMenu->addAction(QStringLiteral("折り返し設定…"), this,
+                        &MainWindow::openWrapSettingsDialog);
     viewMenu->addAction(QStringLiteral("フォント…"), this, &MainWindow::chooseFont);
     m_fontOverride = viewMenu->addAction(QStringLiteral("フォントを本文に適用"));
     m_fontOverride->setCheckable(true);
@@ -1211,6 +1257,10 @@ void MainWindow::restoreViewSettings()
     }
     m_translateView = static_cast<TranslateView>(
         qBound(0, settings.value(QStringLiteral("translate/view"), 0).toInt(), 2));
+    m_wrapMode = static_cast<WrapMode>(
+        qBound(0, settings.value(QStringLiteral("view/wrapMode"), 0).toInt(), 1));
+    m_wrapCharacters =
+        qBound(10, settings.value(QStringLiteral("view/wrapCharacters"), 40).toInt(), 120);
 
     // Restore the font choice without firing the change handlers (which would
     // persist defaults). injectViewStyle runs on each chapter load.
@@ -1609,6 +1659,16 @@ QString MainWindow::viewStyleCss() const
     // Comfortable left/right reading margins (physical, so they apply equally to
     // horizontal and vertical-rl writing modes). box-sizing keeps them inside.
     css += QStringLiteral(" html{box-sizing:border-box;padding-left:6%;padding-right:6%;}");
+    if (m_wrapMode == WrapMode::CharacterCount) {
+        // `em` makes the measure follow the selected font and zoom. Logical
+        // inline-size also does the right thing for vertical-writing EPUBs.
+        css += QStringLiteral(
+                   " html:not(.spindle-image-chapter) body{max-inline-size:%1em !important;"
+                   "margin-inline:auto !important;overflow-wrap:anywhere;}")
+                   .arg(m_wrapCharacters);
+    } else {
+        css += QStringLiteral(" body{max-inline-size:none !important;}");
+    }
 
     // A chapter made of a single image (common for manga-style EPUBs) fills the
     // window instead of sitting inside the reading margins. reader.js tags

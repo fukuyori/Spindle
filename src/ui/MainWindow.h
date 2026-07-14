@@ -105,6 +105,7 @@ private slots:
     void exportTranslatedEpub(int mode); // 0 bilingual, 1 translation-only
     void showAboutDialog();
     void openAppearanceDialog();
+    void openWrapSettingsDialog();
 
 private:
     void buildUi();
@@ -252,6 +253,7 @@ private:
     enum class Theme { Light, Sepia, Dark };
     enum class TranslateView { Original, Bilingual, Translation };
     enum class SummaryDetail { Brief, Standard, Detailed };
+    enum class WrapMode { WindowWidth, CharacterCount };
     struct BrightnessAdjust {
         int background = 0;
         int original = 0;
@@ -268,6 +270,8 @@ private:
     bool m_xmlView = false; // show raw chapter source instead of rendered view
     QString m_fontFamily;   // body font override ("" = use the book's own fonts)
     QString m_fontChoice;   // last font picked in 表示 > フォント… (persisted)
+    WrapMode m_wrapMode = WrapMode::WindowWidth;
+    int m_wrapCharacters = 40;
 
     QVector<ChapterText> m_chapterTexts;
     bool m_chapterTextsReady = false;

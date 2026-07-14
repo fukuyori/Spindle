@@ -19,8 +19,9 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Full-fidelity rendering** via Qt WebEngine + the `epub://` scheme:
   vertical & horizontal layouts, publisher CSS, embedded fonts and images.
 - **Reading controls** — chapter navigation, font zoom, a font picker that can
-  override the book's own fonts, light / sepia / dark themes, and a collapsible
-  table-of-contents sidebar. The theme, window size, and translation view are
+  override the book's own fonts, line wrapping by window width or a chosen
+  character count, light / sepia / dark themes, and a collapsible table-of-contents
+  sidebar. The theme, window size, translation view, and wrapping preference are
   restored on the next launch. The 8 most recently opened EPUBs can be shown in
   the left pane for quick reopening. History entries remember the last-opened
   chapter, and after one is opened the pane stays visible and switches back to
@@ -101,6 +102,9 @@ in a new window, so you can read several at once.
 - **Brightness:** choose **表示 → 明るさ調整…** to adjust the current theme, or
   select another theme in the dialog. Background, original text, and translated
   text are saved separately for each theme.
+- **Line wrapping:** choose **表示 → 折り返し設定…** to fit lines to the window
+  or limit them to a selected measure of 10–120 characters (initially 40).
+  The saved preference also applies to vertical writing.
 - **Highlight:** select text → pick a colour from the popup (which also offers
   Copy, Translate, Summarize, and Search the web). Click an existing highlight
   to copy it, search it on the web, change its colour, edit its note, or delete it.

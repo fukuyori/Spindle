@@ -4,6 +4,13 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-07-15
+
+### Added
+- **Configurable line wrapping.** 表示 > 折り返し設定… can keep text fitted to
+  the window or limit each line to a chosen 10–120 character measure (initially
+  40). The setting is saved across launches and also works with vertical writing.
+
 ## [0.6.1] - 2026-07-14
 
 ### Fixed
@@ -539,6 +546,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.6.2]: https://github.com/fukuyori/Spindle/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/fukuyori/Spindle/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/fukuyori/Spindle/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/fukuyori/Spindle/compare/v0.5.1...v0.5.2
