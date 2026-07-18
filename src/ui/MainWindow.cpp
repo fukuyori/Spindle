@@ -162,8 +162,10 @@ protected:
     }
 };
 
-// Floating translation result popup: a Qt::Popup (so an outside click dismisses
-// it) that also closes on Escape.
+// Floating translation result popup that closes on Escape or any click outside
+// it. Qt::Popup's own mouse grab cannot see clicks landing on the web view's
+// render surface (a native child window), so an application-wide event filter
+// watches for outside presses while the popup is visible.
 class TranslatePopup : public QLabel {
 public:
     TranslatePopup() : QLabel(nullptr, Qt::Popup) {}
@@ -176,6 +178,28 @@ protected:
             return;
         }
         QLabel::keyPressEvent(event);
+    }
+
+    void showEvent(QShowEvent *event) override
+    {
+        qApp->installEventFilter(this);
+        QLabel::showEvent(event);
+    }
+
+    void hideEvent(QHideEvent *event) override
+    {
+        qApp->removeEventFilter(this);
+        QLabel::hideEvent(event);
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() == QEvent::MouseButtonPress) {
+            const auto *me = static_cast<QMouseEvent *>(event);
+            if (!geometry().contains(me->globalPosition().toPoint()))
+                hide();
+        }
+        return QLabel::eventFilter(watched, event);
     }
 };
 
@@ -1173,8 +1197,6 @@ void MainWindow::ensureWebView()
     m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
     connect(m_view, &QWebEngineView::loadFinished, this, &MainWindow::onLoadFinished);
     m_view->page()->setBackgroundColor(themeBackground());
-    setupWebChannel();
-    injectViewStyle(); // install the pre-paint theme script
 
     // The companion view is kept lightweight: it renders only the adjacent
     // fixed-layout page, while all translation/highlight/search interaction
@@ -1207,6 +1229,13 @@ void MainWindow::ensureWebView()
     m_spreadView->page()->scripts().insert(companionMarker);
     installReaderScript(m_spreadView);
     m_spreadView->hide();
+
+    // After BOTH views exist: setupWebChannel()/injectViewStyle() wire the
+    // bridge, qwebchannel.js, and theme into every view they can see, so the
+    // spread view must already be created (otherwise its page gets no web
+    // channel and selections there can never reach C++).
+    setupWebChannel();
+    injectViewStyle(); // install the pre-paint theme script
 
     m_readerLayout->addWidget(m_view, 1);
     m_readerLayout->addWidget(m_spreadView, 1);

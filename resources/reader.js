@@ -256,6 +256,11 @@
         window.spindle.selectionMade(-1, "", currentLang || "", 0, 0, text);
     }
 
+    // The spread companion shows the chapter *after* the current one, so its
+    // block numbers would anchor a highlight to the wrong chapter. Text
+    // actions only.
+    if (window.__spindleCompanion) return reportUnanchored();
+
     var side = sideOfNode(range.startContainer);
     if (!side) return reportUnanchored();
     // A single highlight cannot span original and translation.

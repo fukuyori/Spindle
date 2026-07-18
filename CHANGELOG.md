@@ -4,15 +4,30 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.5] - 2026-07-18
+
+### Changed
+- **The selection-translation popup closes on any click outside it.** Clicks
+  landing on the reading view (a native child window invisible to the popup's
+  mouse grab) previously left the popup open; only clicking outside the app
+  window or pressing Escape dismissed it.
+
+### Fixed
+- **Selection translation works in fixed-layout books.** The facing-page
+  spread view was created after the web channel was wired up, so selections on
+  the companion page could never reach the app — no menu appeared. The
+  companion page now connects to the bridge; selecting text there opens the
+  text-action menu (翻訳 / 要約 / コピー / Web で検索). Highlight colors and
+  notes are offered only on the primary page, where the selection can be
+  anchored to the current chapter.
+
 ## [0.6.4] - 2026-07-18
 
 ### Fixed
-- **Selection translation works in fixed-layout books.** Text selections that
-  cannot be anchored to a paragraph block (fixed-layout overlay text, SVG
-  text, or chapters whose markup prevented block-id injection) now still open
-  the selection menu with 翻訳 / 要約 / コピー / Web で検索. Highlight colors
-  and notes stay hidden for such selections because character positions cannot
-  be stored for them.
+- **Selections that cannot be anchored to a paragraph block still open the
+  menu.** Fixed-layout overlay text, SVG text, or chapters whose markup
+  prevented block-id injection now fall back to the text-action menu instead
+  of silently doing nothing.
 
 ## [0.6.3] - 2026-07-18
 
@@ -585,6 +600,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.6.5]: https://github.com/fukuyori/Spindle/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/fukuyori/Spindle/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/fukuyori/Spindle/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/fukuyori/Spindle/compare/v0.6.1...v0.6.2
