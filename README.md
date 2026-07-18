@@ -18,6 +18,12 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   nested entries.
 - **Full-fidelity rendering** via Qt WebEngine + the `epub://` scheme:
   vertical & horizontal layouts, publisher CSS, embedded fonts and images.
+- **Fixed-layout EPUBs** — fit the complete page to the reading pane without
+  changing its aspect ratio; optional facing-page spreads honor left/right
+  progression and page-placement metadata. Left/Right turns on the first key
+  press, and clicking the outer 15% of the page turns in that direction. The
+  first spine page is always shown alone as the cover. Binding can be automatic,
+  right-bound, or left-bound; automatic uses right binding for vertical writing.
 - **Reading controls** — chapter navigation, font zoom, a font picker that can
   override the book's own fonts, line wrapping by window width or a chosen
   character count, light / sepia / dark themes, and a collapsible table-of-contents
@@ -91,8 +97,8 @@ in a new window, so you can read several at once.
 
 | Action | Shortcut |
 |--------|----------|
-| Next chapter | `Space` / `→` |
-| Previous chapter | `←` |
+| Next chapter / fixed-layout page | `Space` / `→` |
+| Previous chapter / fixed-layout page | `←` |
 | Focus search | `Cmd` / `Ctrl` + `F` |
 | Read aloud / pause | `Ctrl` + `Shift` + `S` |
 
@@ -105,6 +111,10 @@ in a new window, so you can read several at once.
 - **Line wrapping:** choose **表示 → 折り返し設定…** to fit lines to the window
   or limit them to a selected measure of 10–120 characters (initially 40).
   The saved preference also applies to vertical writing.
+- **Fixed layout:** use **表示 → 固定レイアウトを見開き表示** to toggle spreads,
+  and **表示 → 固定レイアウトの綴じ方向** to choose automatic, right-bound,
+  or left-bound. Binding is saved per EPUB in Spindle's settings; the EPUB file
+  itself is never modified.
 - **Highlight:** select text → pick a colour from the popup (which also offers
   Copy, Translate, Summarize, and Search the web). Click an existing highlight
   to copy it, search it on the web, change its colour, edit its note, or delete it.

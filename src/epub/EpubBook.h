@@ -16,11 +16,20 @@ struct ManifestItem {
     QString properties;
 };
 
+enum class PageSpread {
+    Auto,
+    Left,
+    Right,
+    Center,
+};
+
 struct Chapter {
     QString id;
     QString href;
     QString path; // resolved zip-internal path
     QString label;
+    bool fixedLayout = false;
+    PageSpread pageSpread = PageSpread::Auto;
 };
 
 struct TocItem {
@@ -43,6 +52,7 @@ public:
     QString language() const { return m_language; } // dc:language ("" if absent)
     QString opfDir() const { return m_opfDir; }
     bool verticalRtl() const { return m_verticalRtl; }
+    bool fixedLayout() const { return m_fixedLayout; }
 
     const QVector<Chapter> &chapters() const { return m_chapters; }
     const QVector<TocItem> &toc() const { return m_toc; }
@@ -69,6 +79,7 @@ private:
     QString m_language;
     QString m_opfDir;
     bool m_verticalRtl = false;
+    bool m_fixedLayout = false;
     QVector<Chapter> m_chapters;
     QVector<TocItem> m_toc;
     QHash<QString, int> m_chapterIndexByPath; // zip path -> spine index

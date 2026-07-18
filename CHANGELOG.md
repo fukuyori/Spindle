@@ -4,6 +4,35 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.3] - 2026-07-18
+
+### Added
+- **Fixed-layout EPUBs can be read as facing-page spreads.** The new
+  表示 → 固定レイアウトを見開き表示 option is enabled by default and honors
+  the book's left/right page-progression direction plus `page-spread-*`
+  placement metadata. Clicking the outer 15% of either page also turns the
+  spread in the corresponding physical direction. The first spine page is
+  always treated as a cover and shown alone. Binding direction can be set to
+  automatic, right-bound, or left-bound; automatic uses right binding for
+  vertical writing and otherwise follows the EPUB.
+
+### Fixed
+- **Fixed-layout arrow navigation turns the page on the first key press.**
+  Left/Right are intercepted before Chromium can use the first press to
+  horizontally scroll an oversized page. The complete fixed page is fitted to
+  the reading pane while retaining its authored aspect ratio. Books that omit
+  `rendition:layout` are also recognized when every spine document is exactly
+  one image page with no surrounding text.
+- **Single-image chapters now always open fitted to the reading pane.** The
+  source image's aspect ratio determines whether its width or height meets the
+  window edge, independently of the retained text zoom. Image zoom and mouse
+  drag panning now use the image's actual bounds, avoiding scrollable empty
+  space on the non-overflowing axis.
+- **Book-search results now jump to the selected occurrence.** Repeated matches
+  in the same chapter use their stored text offsets instead of always opening
+  Chromium's first match. Pressing Enter in the search field opens the first
+  result immediately.
+
 ## [0.6.2] - 2026-07-15
 
 ### Added
@@ -546,6 +575,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.6.3]: https://github.com/fukuyori/Spindle/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/fukuyori/Spindle/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/fukuyori/Spindle/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/fukuyori/Spindle/compare/v0.5.2...v0.6.0

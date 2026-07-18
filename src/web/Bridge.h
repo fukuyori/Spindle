@@ -31,6 +31,15 @@ public:
     Q_INVOKABLE QString currentTranslateView() const { return m_translateView; }
     Q_INVOKABLE QString currentTranslateLang() const { return m_lang; }
     Q_INVOKABLE void blocksCollected(const QString &json) { emit blocksReady(json); }
+    Q_INVOKABLE void fixedPageEdgeClicked(int edge)
+    {
+        if (edge != 0)
+            emit fixedPageEdgeClickRequested(edge < 0 ? -1 : 1);
+    }
+    Q_INVOKABLE void pageWritingModeDetected(bool vertical)
+    {
+        emit pageWritingModeDetectionRequested(vertical);
+    }
 
     // Called from C++ to drive the page.
     void applyTranslation(int index, const QString &text, const QString &state)
@@ -46,6 +55,8 @@ signals:
     void highlightsChanged();
     void translateViewChanged(const QString &view);
     void blocksReady(const QString &json);
+    void fixedPageEdgeClickRequested(int edge);
+    void pageWritingModeDetectionRequested(bool vertical);
     void translationReady(int index, const QString &text, const QString &state);
     void scrollToHighlight(const QString &id);
 

@@ -12,6 +12,7 @@
 #include <QLocale>
 #include <QMainWindow>
 #include <QPair>
+#include <QPoint>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -21,6 +22,7 @@
 class EpubBook;
 class EpubSchemeHandler;
 class QDialog;
+class QHBoxLayout;
 class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
@@ -108,6 +110,12 @@ private slots:
     void openWrapSettingsDialog();
 
 private:
+    enum class BindingMode {
+        Auto = 0,
+        Right = 1,
+        Left = 2,
+    };
+
     void buildUi();
     void applyFontChoice(); // read the font picker, persist, and re-inject CSS
     QString translationColor() const; // resolve m_trColor for the current theme ("" = none)
@@ -132,6 +140,7 @@ private:
     void addTocItems(const QVector<TocItem> &items, QTreeWidgetItem *parent);
     void displayChapter(int index, const QString &fragment = QString());
     void applyZoom();
+    void adjustZoom(int deltaPercent);
     // Theme CSS is delivered two ways: a DocumentCreation user script (so a
     // newly navigated chapter paints correctly on its very first frame — no
     // flash of the book's own styles) and a live runJavaScript for the page
@@ -147,11 +156,22 @@ private:
     void ensureChapterTexts();
     void startChapterTextsBuild(); // kick off the background build after open
     void adoptChapterTexts();      // take the finished future's result (once)
+    void showSearchHit(int start, int end, const QString &fallbackQuery);
 
     // Deferred web-view creation: the window shows immediately and Chromium
     // (the bulk of cold-start time) initializes afterwards / on first use.
     void ensureWebView();
     void revealWebView();          // swap the placeholder for m_view once ready
+    void installReaderScript(QWebEngineView *view);
+    void installReaderEventFilters(QObject *root);
+    bool currentChapterFixedLayout() const;
+    bool fixedSpreadEnabled() const;
+    bool rightBinding() const;
+    void loadBindingMode();
+    void setBindingMode(BindingMode mode);
+    int pageTurnStep() const;
+    void updateFixedSpread();
+    void requestPageTurn(int direction);
     void updatePlaceholderBackground(); // keep the placeholder themed while shown
     void restoreViewSettings(); // QSettings restore split out of setupWebChannel
     // Right-click on an image in the reading pane: Chromium's own "Copy
@@ -284,10 +304,15 @@ private:
 
     QString m_pendingFragment;
     QString m_pendingFind;
+    int m_pendingSearchStart = -1;
+    int m_pendingSearchEnd = -1;
     QString m_pendingScrollId; // highlight id to scroll to after the page loads
 
     QString m_schemeId; // unique epub:// host for this window's book
     QWebEngineView *m_view = nullptr; // created lazily — see ensureWebView()
+    QWebEngineView *m_spreadView = nullptr; // adjacent fixed-layout page
+    QWidget *m_readerContainer = nullptr;
+    QHBoxLayout *m_readerLayout = nullptr;
     QSplitter *m_splitter = nullptr;
     QWidget *m_viewPlaceholder = nullptr; // holds the view's splitter slot until then
     // Chromium's first-ever composited frame on a brand-new QWebEngineView is
@@ -415,6 +440,11 @@ private:
     QWidget *m_sidebar = nullptr;
     QStackedWidget *m_sidebarStack = nullptr;
     QAction *m_sidebarAction = nullptr;
+    QAction *m_spreadAction = nullptr;
+    QMenu *m_bindingMenu = nullptr;
+    QAction *m_bindingModeActs[3] = {nullptr, nullptr, nullptr};
+    BindingMode m_bindingMode = BindingMode::Auto;
+    bool m_currentPageVerticalWriting = false;
     QPushButton *m_tabToc = nullptr;
     QPushButton *m_tabHighlights = nullptr;
     QPushButton *m_tabRecent = nullptr;
@@ -427,6 +457,9 @@ private:
     QLabel *m_location = nullptr;
     QAction *m_prevAction = nullptr;
     QAction *m_nextAction = nullptr;
+    bool m_pageTurnPressCaptured = false;
+    int m_pageTurnPressDirection = 0;
+    QPoint m_pageTurnPressPosition;
     // Toolbar translation-view switcher (indexes follow TranslateView).
     QAction *m_viewModeActs[3] = {nullptr, nullptr, nullptr};
     QTimer *m_searchDebounce = nullptr;

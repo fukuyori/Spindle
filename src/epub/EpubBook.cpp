@@ -97,6 +97,92 @@ QDomElement firstChildElement(const QDomElement &parent, const QString &localNam
     return kids.isEmpty() ? QDomElement() : kids.first();
 }
 
+bool hasPropertyToken(const QString &properties, const QString &token)
+{
+    const QStringList parts = properties.split(QRegularExpression(QStringLiteral("\\s+")),
+                                               Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        if (part.compare(token, Qt::CaseInsensitive) == 0)
+            return true;
+    }
+    return false;
+}
+
+PageSpread pageSpreadFromProperties(const QString &properties)
+{
+    if (hasPropertyToken(properties, QStringLiteral("page-spread-left")))
+        return PageSpread::Left;
+    if (hasPropertyToken(properties, QStringLiteral("page-spread-right")))
+        return PageSpread::Right;
+    if (hasPropertyToken(properties, QStringLiteral("rendition:page-spread-center"))
+        || hasPropertyToken(properties, QStringLiteral("page-spread-center")))
+        return PageSpread::Center;
+    return PageSpread::Auto;
+}
+
+QString elementName(const QDomElement &element)
+{
+    return element.localName().isEmpty() ? element.tagName() : element.localName();
+}
+
+bool hasAncestorNamed(QDomNode node, const QString &name)
+{
+    for (node = node.parentNode(); !node.isNull(); node = node.parentNode()) {
+        if (node.isElement()
+            && elementName(node.toElement()).compare(name, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool hasVisibleTextOutside(const QDomNode &node, const QDomElement &visual)
+{
+    if (node.isElement()) {
+        const QDomElement element = node.toElement();
+        if (element == visual)
+            return false;
+        const QString name = elementName(element);
+        if (name.compare(QStringLiteral("script"), Qt::CaseInsensitive) == 0
+            || name.compare(QStringLiteral("style"), Qt::CaseInsensitive) == 0
+            || name.compare(QStringLiteral("noscript"), Qt::CaseInsensitive) == 0
+            || name.compare(QStringLiteral("template"), Qt::CaseInsensitive) == 0) {
+            return false;
+        }
+    } else if (node.isText() && !node.nodeValue().trimmed().isEmpty()) {
+        return true;
+    }
+
+    for (QDomNode child = node.firstChild(); !child.isNull(); child = child.nextSibling()) {
+        if (hasVisibleTextOutside(child, visual))
+            return true;
+    }
+    return false;
+}
+
+// Some image-based EPUB generators omit rendition:layout even though every
+// spine item is one complete page image. Recognize that narrow structure as a
+// fixed page without treating ordinary chapters containing illustrations as
+// fixed layout.
+bool isSingleImagePage(const QByteArray &xhtml)
+{
+    const QDomDocument doc = parseXml(xhtml);
+    const QDomElement body = firstByLocalName(doc.documentElement(), QStringLiteral("body"));
+    if (body.isNull())
+        return false;
+
+    QVector<QDomElement> visuals;
+    for (const QDomElement &image : elementsByLocalName(body, QStringLiteral("img"))) {
+        if (!hasAncestorNamed(image, QStringLiteral("svg")))
+            visuals.append(image);
+    }
+    for (const QDomElement &svg : elementsByLocalName(body, QStringLiteral("svg"))) {
+        if (!hasAncestorNamed(svg, QStringLiteral("svg")))
+            visuals.append(svg);
+    }
+    return visuals.size() == 1 && !hasVisibleTextOutside(body, visuals.first());
+}
+
 } // namespace
 
 bool EpubBook::open(const QString &filePath)
@@ -106,6 +192,8 @@ bool EpubBook::open(const QString &filePath)
     m_chapters.clear();
     m_toc.clear();
     m_chapterIndexByPath.clear();
+    m_verticalRtl = false;
+    m_fixedLayout = false;
 
     if (!m_zip.open(filePath)) {
         m_error = QStringLiteral("EPUB ファイルを開けませんでした");
@@ -125,6 +213,34 @@ bool EpubBook::open(const QString &filePath)
     m_title = textByLocalName(opf, QStringLiteral("title"));
     m_author = textByLocalName(opf, QStringLiteral("creator"));
     m_language = textByLocalName(opf, QStringLiteral("language"));
+
+    bool layoutMetadataDeclared = false;
+
+    // EPUB 3 fixed-layout metadata is normally global
+    // (`rendition:layout=pre-paginated`). Keep the common EPUB 2/Apple form as
+    // a compatibility fallback; per-spine declarations are handled below.
+    for (const QDomElement &meta :
+         elementsByLocalName(opf.documentElement(), QStringLiteral("meta"))) {
+        const QString property = meta.attribute(QStringLiteral("property")).trimmed();
+        const QString name = meta.attribute(QStringLiteral("name")).trimmed();
+        const QString value =
+            (meta.attribute(QStringLiteral("content")).isEmpty()
+                 ? meta.text()
+                 : meta.attribute(QStringLiteral("content")))
+                .trimmed();
+        const bool renditionLayout =
+            property.compare(QStringLiteral("rendition:layout"), Qt::CaseInsensitive) == 0;
+        const bool legacyFixedLayout =
+            name.compare(QStringLiteral("fixed-layout"), Qt::CaseInsensitive) == 0;
+        layoutMetadataDeclared = layoutMetadataDeclared || renditionLayout || legacyFixedLayout;
+        if ((renditionLayout
+             && value.compare(QStringLiteral("pre-paginated"), Qt::CaseInsensitive) == 0)
+            || (legacyFixedLayout
+                && (value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
+                    || value == QLatin1String("1")))) {
+            m_fixedLayout = true;
+        }
+    }
 
     // --- manifest ---
     QHash<QString, ManifestItem> manifest;
@@ -150,11 +266,49 @@ bool EpubBook::open(const QString &filePath)
                                           QStringLiteral("ltr"));
     m_verticalRtl = (ppd == QLatin1String("rtl"));
 
-    QStringList spine;
+    struct SpineRef {
+        QString idref;
+        QString properties;
+    };
+    QVector<SpineRef> spine;
     for (const QDomElement &itemref : elementsByLocalName(spineEl, QStringLiteral("itemref"))) {
         const QString idref = itemref.attribute(QStringLiteral("idref"));
         if (!idref.isEmpty())
-            spine.append(idref);
+            spine.append(
+                {idref, itemref.attribute(QStringLiteral("properties")).trimmed()});
+    }
+
+    // A small but common class of scanned/image EPUBs is structurally fixed
+    // layout while omitting the rendition metadata entirely. Infer book-level
+    // fixed layout only when at least two valid spine documents exist and every
+    // one consists of exactly one image (or one SVG) with no text outside it.
+    // An explicit reflowable declaration always wins over this fallback.
+    if (!layoutMetadataDeclared && !m_fixedLayout) {
+        int documentCount = 0;
+        int singleImagePageCount = 0;
+        bool perItemLayoutDeclared = false;
+        for (const SpineRef &ref : spine) {
+            auto it = manifest.constFind(ref.idref);
+            if (it == manifest.constEnd())
+                continue;
+            perItemLayoutDeclared =
+                perItemLayoutDeclared
+                || hasPropertyToken(it->properties,
+                                    QStringLiteral("rendition:layout-pre-paginated"))
+                || hasPropertyToken(it->properties,
+                                    QStringLiteral("rendition:layout-reflowable"))
+                || hasPropertyToken(ref.properties,
+                                    QStringLiteral("rendition:layout-pre-paginated"))
+                || hasPropertyToken(ref.properties,
+                                    QStringLiteral("rendition:layout-reflowable"));
+            ++documentCount;
+            if (isSingleImagePage(m_zip.readBytes(it->path)))
+                ++singleImagePageCount;
+        }
+        if (!perItemLayoutDeclared && documentCount >= 2
+            && singleImagePageCount == documentCount) {
+            m_fixedLayout = true;
+        }
     }
 
     // --- table of contents (nav preferred, ncx fallback) ---
@@ -194,14 +348,25 @@ bool EpubBook::open(const QString &filePath)
 
     // --- chapters (spine order) ---
     int index = 0;
-    for (const QString &id : spine) {
-        auto it = manifest.constFind(id);
+    const bool globallyFixedLayout = m_fixedLayout;
+    for (const SpineRef &ref : spine) {
+        auto it = manifest.constFind(ref.idref);
         if (it == manifest.constEnd())
             continue;
         Chapter ch;
-        ch.id = id;
+        ch.id = ref.idref;
         ch.href = it->href;
         ch.path = it->path;
+        ch.fixedLayout =
+            globallyFixedLayout
+            || hasPropertyToken(it->properties,
+                                QStringLiteral("rendition:layout-pre-paginated"))
+            || hasPropertyToken(ref.properties,
+                                QStringLiteral("rendition:layout-pre-paginated"));
+        ch.pageSpread = pageSpreadFromProperties(ref.properties);
+        if (ch.pageSpread == PageSpread::Auto)
+            ch.pageSpread = pageSpreadFromProperties(it->properties);
+        m_fixedLayout = m_fixedLayout || ch.fixedLayout;
         const QString label = findTocLabel(m_toc, ch.path);
         ch.label = label.isEmpty() ? QStringLiteral("Chapter %1").arg(index + 1) : label;
         m_chapters.append(ch);

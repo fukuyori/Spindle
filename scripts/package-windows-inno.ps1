@@ -81,6 +81,7 @@ function Copy-DeployedBuildOutput {
 
   Get-ChildItem -LiteralPath $SourceDir -Force | ForEach-Object {
     $isExcluded = ($excludedNames -contains $_.Name) -or
+      ($_.PSIsContainer -and $_.Name -like "*_autogen") -or
       (-not $_.PSIsContainer -and ($excludedExtensions -contains $_.Extension))
     if (-not $isExcluded) {
       Copy-Item -LiteralPath $_.FullName -Destination $DestinationDir -Recurse -Force

@@ -54,6 +54,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPen>
 #include <QPixmap>
@@ -764,6 +765,39 @@ void MainWindow::buildUi()
     viewMenu->addSeparator();
     viewMenu->addAction(QStringLiteral("折り返し設定…"), this,
                         &MainWindow::openWrapSettingsDialog);
+    m_spreadAction = viewMenu->addAction(QStringLiteral("固定レイアウトを見開き表示"));
+    m_spreadAction->setCheckable(true);
+    m_spreadAction->setChecked(
+        QSettings().value(QStringLiteral("view/fixedSpread"), true).toBool());
+    m_spreadAction->setEnabled(false);
+    m_spreadAction->setToolTip(
+        QStringLiteral("固定レイアウトEPUBの隣り合う2ページを並べて表示"));
+    connect(m_spreadAction, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue(QStringLiteral("view/fixedSpread"), on);
+        updateFixedSpread();
+        updateLocation();
+        updateNavButtons();
+    });
+    m_bindingMenu = viewMenu->addMenu(QStringLiteral("固定レイアウトの綴じ方向"));
+    m_bindingMenu->setEnabled(false);
+    auto *bindingGroup = new QActionGroup(this);
+    bindingGroup->setExclusive(true);
+    const QStringList bindingLabels{
+        QStringLiteral("自動（EPUB指定／縦書きは右綴じ）"),
+        QStringLiteral("右綴じ"),
+        QStringLiteral("左綴じ"),
+    };
+    for (int i = 0; i < bindingLabels.size(); ++i) {
+        QAction *action = m_bindingMenu->addAction(bindingLabels.at(i));
+        action->setCheckable(true);
+        bindingGroup->addAction(action);
+        m_bindingModeActs[i] = action;
+        connect(action, &QAction::triggered, this, [this, i](bool checked) {
+            if (checked)
+                setBindingMode(static_cast<BindingMode>(i));
+        });
+    }
+    m_bindingModeActs[static_cast<int>(BindingMode::Auto)]->setChecked(true);
     viewMenu->addAction(QStringLiteral("フォント…"), this, &MainWindow::chooseFont);
     m_fontOverride = viewMenu->addAction(QStringLiteral("フォントを本文に適用"));
     m_fontOverride->setCheckable(true);
@@ -963,6 +997,18 @@ void MainWindow::buildUi()
     m_searchInput->setPlaceholderText(QStringLiteral("本文を検索..."));
     m_searchInput->setClearButtonEnabled(true);
     connect(m_searchInput, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
+    connect(m_searchInput, &QLineEdit::returnPressed, this, [this] {
+        m_searchDebounce->stop();
+        runSearch();
+        for (int row = 0; row < m_searchResults->count(); ++row) {
+            QListWidgetItem *item = m_searchResults->item(row);
+            if (!item->data(Qt::UserRole).toString().isEmpty()) {
+                m_searchResults->setCurrentItem(item);
+                onSearchResultActivated(item);
+                break;
+            }
+        }
+    });
 
     QWidget *tabs = new QWidget(sidebar);
     QHBoxLayout *tabsLayout = new QHBoxLayout(tabs);
@@ -1005,6 +1051,8 @@ void MainWindow::buildUi()
     m_searchResults = new QListWidget(sidebar);
     m_searchResults->setWordWrap(true);
     connect(m_searchResults, &QListWidget::itemClicked, this, &MainWindow::onSearchResultActivated);
+    connect(m_searchResults, &QListWidget::itemActivated, this,
+            &MainWindow::onSearchResultActivated);
 
     m_recentEpubsList = new QListWidget(sidebar);
     m_recentEpubsList->setWordWrap(true);
@@ -1097,7 +1145,12 @@ void MainWindow::ensureWebView()
         schemeHandlerInstalled = true;
     }
 
-    auto *view = new ReaderView(this);
+    m_readerContainer = new QWidget(this);
+    m_readerLayout = new QHBoxLayout(m_readerContainer);
+    m_readerLayout->setContentsMargins(0, 0, 0, 0);
+    m_readerLayout->setSpacing(2);
+
+    auto *view = new ReaderView(m_readerContainer);
     view->onImageContextMenu = [this](const QPoint &globalPos, const QUrl &mediaUrl) {
         handleImageContextMenu(globalPos, mediaUrl);
     };
@@ -1115,13 +1168,48 @@ void MainWindow::ensureWebView()
             });
     // Catch EPUB drops over the page area: the view's render widget (a lazily
     // created child) handles drops itself, so watch it and its descendants.
-    m_view->installEventFilter(this);
+    installReaderEventFilters(m_view);
     m_view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
     m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
     connect(m_view, &QWebEngineView::loadFinished, this, &MainWindow::onLoadFinished);
     m_view->page()->setBackgroundColor(themeBackground());
     setupWebChannel();
     injectViewStyle(); // install the pre-paint theme script
+
+    // The companion view is kept lightweight: it renders only the adjacent
+    // fixed-layout page, while all translation/highlight/search interaction
+    // remains attached to the primary view.
+    auto *spreadView = new ReaderView(m_readerContainer);
+    spreadView->onImageContextMenu = [this](const QPoint &globalPos, const QUrl &mediaUrl) {
+        handleImageContextMenu(globalPos, mediaUrl);
+    };
+    m_spreadView = spreadView;
+    auto *spreadPage = new ReaderPage(m_schemeId, m_spreadView);
+    m_spreadView->setPage(spreadPage);
+    connect(spreadPage, &QWebEnginePage::newWindowRequested, this,
+            [](QWebEngineNewWindowRequest &request) {
+                const QUrl url = request.requestedUrl();
+                if (url.scheme() == QLatin1String("http")
+                    || url.scheme() == QLatin1String("https"))
+                    QDesktopServices::openUrl(url);
+            });
+    installReaderEventFilters(m_spreadView);
+    m_spreadView->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+    m_spreadView->settings()->setAttribute(
+        QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
+    m_spreadView->page()->setBackgroundColor(themeBackground());
+    QWebEngineScript companionMarker;
+    companionMarker.setName(QStringLiteral("spindle-companion-marker"));
+    companionMarker.setSourceCode(QStringLiteral("window.__spindleCompanion = true;"));
+    companionMarker.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    companionMarker.setWorldId(QWebEngineScript::ApplicationWorld);
+    companionMarker.setRunsOnSubFrames(false);
+    m_spreadView->page()->scripts().insert(companionMarker);
+    installReaderScript(m_spreadView);
+    m_spreadView->hide();
+
+    m_readerLayout->addWidget(m_view, 1);
+    m_readerLayout->addWidget(m_spreadView, 1);
 
     // Not swapped into the splitter yet: the view can load in the background
     // (Qt WebEngine supports this fine) while the themed placeholder keeps
@@ -1135,7 +1223,7 @@ void MainWindow::revealWebView()
     m_viewRevealed = true;
     if (m_splitter && m_viewPlaceholder) {
         const int index = m_splitter->indexOf(m_viewPlaceholder);
-        m_splitter->replaceWidget(index, m_view);
+        m_splitter->replaceWidget(index, m_readerContainer);
         delete m_viewPlaceholder;
         m_viewPlaceholder = nullptr;
         m_splitter->setStretchFactor(index, 1);
@@ -1179,6 +1267,35 @@ void MainWindow::handleImageContextMenu(const QPoint &globalPos, const QUrl &med
     }
 }
 
+void MainWindow::installReaderScript(QWebEngineView *view)
+{
+    if (!view)
+        return;
+    QFile f(QStringLiteral(":/reader.js"));
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    QWebEngineScript script;
+    script.setName(QStringLiteral("spindle-reader"));
+    script.setSourceCode(QString::fromUtf8(f.readAll()));
+    script.setInjectionPoint(QWebEngineScript::DocumentReady);
+    script.setWorldId(QWebEngineScript::ApplicationWorld);
+    script.setRunsOnSubFrames(false);
+    view->page()->scripts().insert(script);
+}
+
+void MainWindow::installReaderEventFilters(QObject *root)
+{
+    if (!root)
+        return;
+
+    root->installEventFilter(this);
+    const auto children = root->children();
+    for (QObject *child : children) {
+        if (child->isWidgetType())
+            installReaderEventFilters(child);
+    }
+}
+
 void MainWindow::setupWebChannel()
 {
     m_bridge = new Bridge(this);
@@ -1187,9 +1304,25 @@ void MainWindow::setupWebChannel()
     // ApplicationWorld: the bridge and our scripts live in an isolated JS world
     // (shared DOM, separate globals), out of reach of any page script.
     m_view->page()->setWebChannel(m_channel, QWebEngineScript::ApplicationWorld);
+    if (m_spreadView)
+        m_spreadView->page()->setWebChannel(m_channel, QWebEngineScript::ApplicationWorld);
     connect(m_bridge, &Bridge::selectionReceived, this, &MainWindow::onWebSelection);
     connect(m_bridge, &Bridge::markActivated, this, &MainWindow::onMarkClicked);
     connect(m_bridge, &Bridge::blocksReady, this, &MainWindow::onBlocksReady);
+    connect(m_bridge, &Bridge::fixedPageEdgeClickRequested, this, [this](int edge) {
+        requestPageTurn(rightBinding() ? -edge : edge);
+    });
+    connect(m_bridge, &Bridge::pageWritingModeDetectionRequested, this,
+            [this](bool vertical) {
+                if (m_currentPageVerticalWriting == vertical)
+                    return;
+                m_currentPageVerticalWriting = vertical;
+                if (m_bindingMode == BindingMode::Auto) {
+                    updateFixedSpread();
+                    updateLocation();
+                    updateNavButtons();
+                }
+    });
 
     m_ollama = new OllamaClient(this);
     connect(m_ollama, &OllamaClient::finished, this, &MainWindow::onOllamaFinished);
@@ -1215,6 +1348,8 @@ void MainWindow::setupWebChannel()
         s.setWorldId(QWebEngineScript::ApplicationWorld);
         s.setRunsOnSubFrames(false);
         m_view->page()->scripts().insert(s);
+        if (m_spreadView)
+            m_spreadView->page()->scripts().insert(s);
     }
 
     const QString reader = readResource(QStringLiteral(":/reader.js"));
@@ -1463,10 +1598,19 @@ bool MainWindow::openEpub(const QString &filePath)
 
     m_book = std::move(book);
     m_epubPath = filePath;
+    m_currentPageVerticalWriting = false;
+    loadBindingMode();
     ensureWebView(); // displayChapter below needs the (lazily created) view
+    if (m_spreadAction)
+        m_spreadAction->setEnabled(m_book->fixedLayout());
+    if (m_bindingMenu)
+        m_bindingMenu->setEnabled(m_book->fixedLayout());
     EpubSchemeHandler::instance()->registerBook(m_schemeId, m_book.get());
     m_chapterTexts.clear();
     m_chapterTextsReady = false;
+    m_pendingFind.clear();
+    m_pendingSearchStart = -1;
+    m_pendingSearchEnd = -1;
     m_searchInput->clear();
 
     m_bookId = bookId(m_book->title(), m_book->author());
@@ -1536,6 +1680,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
         return;
 
     m_currentChapter = index;
+    m_currentPageVerticalWriting = false;
     stopSpeech(); // reading aloud does not survive navigation / reloads
     const Chapter &chapter = m_book->chapters().at(index);
     saveRecentChapter(m_epubPath, index, chapter.label);
@@ -1554,6 +1699,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
         m_view->setUpdatesEnabled(false); // hold the old frame until the load ends
         m_viewUnfreeze->start();
         m_view->setHtml(html);
+        updateFixedSpread();
         updateLocation();
         updateNavButtons();
         return;
@@ -1579,6 +1725,7 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     m_view->setUpdatesEnabled(false); // hold the old frame until the load ends
     m_viewUnfreeze->start();
     m_view->setUrl(QUrl(urlStr));
+    updateFixedSpread();
 
     updateLocation();
     updateNavButtons();
@@ -1611,8 +1758,15 @@ void MainWindow::onLoadFinished(bool ok)
     }
     if (!m_pendingFind.isEmpty()) {
         const QString find = m_pendingFind;
+        const int searchStart = m_pendingSearchStart;
+        const int searchEnd = m_pendingSearchEnd;
         m_pendingFind.clear();
-        m_view->findText(find);
+        m_pendingSearchStart = -1;
+        m_pendingSearchEnd = -1;
+        if (searchStart >= 0 && searchEnd > searchStart)
+            showSearchHit(searchStart, searchEnd, find);
+        else
+            m_view->findText(find);
     }
     if (!m_pendingScrollId.isEmpty()) {
         const QString id = m_pendingScrollId;
@@ -1638,6 +1792,8 @@ void MainWindow::applyZoom()
 {
     if (m_view)
         m_view->setZoomFactor(m_fontSize / 100.0);
+    if (m_spreadView)
+        m_spreadView->setZoomFactor(m_fontSize / 100.0);
 }
 
 QColor MainWindow::themeBackground() const
@@ -1656,6 +1812,8 @@ QString MainWindow::viewStyleCss() const
         "body,body *{color:%2 !important;}"
         ".spindle-translation,.spindle-translation *{color:%3 !important;}")
                       .arg(bg, original, translation);
+    if (m_book && m_book->fixedLayout())
+        css += QStringLiteral(" html{--spindle-fixed-layout:1;}");
     // Comfortable left/right reading margins (physical, so they apply equally to
     // horizontal and vertical-rl writing modes). box-sizing keeps them inside.
     css += QStringLiteral(" html{box-sizing:border-box;padding-left:6%;padding-right:6%;}");
@@ -1670,51 +1828,45 @@ QString MainWindow::viewStyleCss() const
         css += QStringLiteral(" body{max-inline-size:none !important;}");
     }
 
-    // A chapter made of a single image (common for manga-style EPUBs) fills the
-    // window instead of sitting inside the reading margins. reader.js tags
-    // <html> with this class once it confirms the body holds exactly one image
-    // and no other content. The image is scaled with the same A-/A+ zoom the
-    // user already uses for text (m_fontSize), via a `--spindle-img-zoom`
-    // custom property read by the calc() below. This deliberately does NOT use
-    // `transform: scale()`: a transform only changes paint, not layout, so it
-    // never enlarges the element's scrollable-overflow box — overflow:auto
-    // would have nothing to actually scroll, and reader.js's drag-to-pan
-    // (which moves body.scrollLeft/Top) would have nowhere to move. Sizing the
-    // box itself with width/height: calc(100vw * zoom) is real layout, so it
-    // creates genuine scrollable overflow once zoom exceeds 1 — both the
-    // native scrollbars and the drag-to-pan/mouse-wheel scrolling work on it.
-    // object-fit:contain still letterboxes the image's own aspect ratio
-    // inside that (viewport-shaped) box, so zoom 1 looks identical to the
-    // previous fit-to-window behavior.
+    // reader.js recognizes chapters whose only visible content is one image
+    // (including an outer <svg> used by fixed-layout EPUBs). It moves that
+    // image into a stage and writes exact pixel dimensions to the custom
+    // properties below. At zoom 100%, one image edge therefore meets the
+    // viewport edge while the other is centered; at larger image zooms the
+    // stage creates real scrollable overflow for drag panning. Exact width and
+    // height preserve the source aspect ratio and avoid the empty-direction
+    // scrolling caused by enlarging a viewport-shaped object-fit box.
     //
-    // Fixed-layout EPUB pages (e.g. Kindle/Kobo comics) wrap the page image in
-    // one or more plain <div>s and give the <img> itself an inline
-    // position:absolute + fixed pixel width/height (matching the page's own
-    // viewport meta). Inline styles beat any selector without !important, and
-    // absolute positioning takes the image out of flow entirely, so both the
-    // sizing and the flex centering above would otherwise be silently
-    // ignored. Force every non-image wrapper to flex-center its single child
-    // and strip the image's own inline position/size so it participates in
-    // that centering instead.
+    // !important is intentional: fixed-layout books commonly put absolute
+    // positioning and fixed pixel dimensions directly on the image.
     css += QStringLiteral(
         " html.spindle-image-chapter{padding-left:0 !important;padding-right:0 !important;"
-        "height:100%;--spindle-img-zoom:%1;}"
-        " html.spindle-image-chapter body{margin:0 !important;height:100vh;"
-        "display:flex;align-items:center;justify-content:center;overflow:auto;}"
-        " html.spindle-image-chapter body *:not(img):not(svg):not(image){"
-        "position:static !important;display:flex !important;"
+        "width:100% !important;height:100% !important;overflow:auto !important;}"
+        " html.spindle-image-chapter body{margin:0 !important;width:100% !important;"
+        "min-height:100% !important;overflow:visible !important;}"
+        " html.spindle-image-chapter body>*:not(#__spindle_image_stage){"
+        "display:none !important;}"
+        " #__spindle_image_stage{"
+        "box-sizing:border-box !important;display:flex !important;"
         "align-items:center !important;justify-content:center !important;"
-        "width:100% !important;height:100% !important;max-width:none !important;"
-        "max-height:none !important;margin:0 !important;padding:0 !important;}"
-        " html.spindle-image-chapter img,html.spindle-image-chapter svg,"
-        "html.spindle-image-chapter image{"
+        "width:var(--spindle-stage-width) !important;"
+        "height:var(--spindle-stage-height) !important;"
+        "min-width:100vw !important;min-height:100vh !important;"
+        "margin:0 !important;padding:0 !important;}"
+        " #__spindle_image_stage>.spindle-image-page{"
         "position:static !important;top:auto !important;left:auto !important;"
-        "width:calc(100vw * var(--spindle-img-zoom)) !important;"
-        "height:calc(100vh * var(--spindle-img-zoom)) !important;"
+        "width:var(--spindle-image-width) !important;"
+        "height:var(--spindle-image-height) !important;"
+        "max-width:none !important;max-height:none !important;"
+        "min-width:0 !important;min-height:0 !important;"
         "flex:none !important;"
-        "object-fit:contain;display:block !important;margin:auto !important;"
-        "cursor:grab;-webkit-user-drag:none;}")
-                      .arg(QString::number(m_fontSize / 100.0, 'f', 3));
+        "transform:none !important;"
+        "object-fit:fill !important;display:block !important;margin:0 !important;"
+        "-webkit-user-drag:none !important;}"
+        " html.spindle-image-pannable body,"
+        "html.spindle-image-pannable #__spindle_image_stage{cursor:grab !important;}"
+        " html.spindle-image-panning body,"
+        "html.spindle-image-panning #__spindle_image_stage{cursor:grabbing !important;}");
 
     // Optional font override: force the chosen family over the book's own fonts.
     // Skipped in the raw-XHTML source view (which wants its monospace styling).
@@ -1792,6 +1944,16 @@ void MainWindow::injectViewStyle()
     updateThemeScript(css); // backup + XML source view (setHtml, not served)
     m_view->page()->runJavaScript(themeStyleJs(css),
                                   QWebEngineScript::ApplicationWorld); // current page
+    if (m_spreadView) {
+        m_spreadView->page()->setBackgroundColor(bgColor);
+        QPalette spreadPalette = m_spreadView->palette();
+        spreadPalette.setColor(QPalette::Window, bgColor);
+        spreadPalette.setColor(QPalette::Base, bgColor);
+        m_spreadView->setPalette(spreadPalette);
+        m_spreadView->setAutoFillBackground(true);
+        m_spreadView->page()->runJavaScript(themeStyleJs(css),
+                                            QWebEngineScript::ApplicationWorld);
+    }
 }
 
 QColor MainWindow::originalTextColor() const
@@ -1851,10 +2013,19 @@ void MainWindow::updateLocation()
         m_location->setText(QStringLiteral("No book loaded"));
         return;
     }
-    m_location->setText(QStringLiteral("%1 / %2 — %3")
-                            .arg(m_currentChapter + 1)
-                            .arg(m_book->chapters().size())
-                            .arg(m_book->chapters().at(m_currentChapter).label));
+    if (m_spreadView && m_spreadView->isVisible()
+        && m_currentChapter + 1 < m_book->chapters().size()) {
+        m_location->setText(QStringLiteral("%1–%2 / %3 — %4")
+                                .arg(m_currentChapter + 1)
+                                .arg(m_currentChapter + 2)
+                                .arg(m_book->chapters().size())
+                                .arg(m_book->chapters().at(m_currentChapter).label));
+    } else {
+        m_location->setText(QStringLiteral("%1 / %2 — %3")
+                                .arg(m_currentChapter + 1)
+                                .arg(m_book->chapters().size())
+                                .arg(m_book->chapters().at(m_currentChapter).label));
+    }
 }
 
 void MainWindow::updateNavButtons()
@@ -1863,34 +2034,158 @@ void MainWindow::updateNavButtons()
     if (m_prevAction)
         m_prevAction->setEnabled(has && m_currentChapter > 0);
     if (m_nextAction)
-        m_nextAction->setEnabled(has && m_currentChapter < m_book->chapters().size() - 1);
+        m_nextAction->setEnabled(
+            has && m_currentChapter + pageTurnStep() < m_book->chapters().size());
 }
 
 // --- navigation / controls -------------------------------------------------
 
+bool MainWindow::currentChapterFixedLayout() const
+{
+    return m_book && m_currentChapter >= 0
+           && m_currentChapter < m_book->chapters().size()
+           && m_book->chapters().at(m_currentChapter).fixedLayout;
+}
+
+bool MainWindow::fixedSpreadEnabled() const
+{
+    return currentChapterFixedLayout() && !m_xmlView && m_spreadAction
+           && m_spreadAction->isChecked();
+}
+
+bool MainWindow::rightBinding() const
+{
+    if (m_bindingMode == BindingMode::Right)
+        return true;
+    if (m_bindingMode == BindingMode::Left)
+        return false;
+    return m_currentPageVerticalWriting || (m_book && m_book->verticalRtl());
+}
+
+void MainWindow::loadBindingMode()
+{
+    const QString key =
+        QStringLiteral("view/fixedBinding/%1").arg(recentFileKey(m_epubPath));
+    const int value =
+        qBound(0, QSettings().value(key, static_cast<int>(BindingMode::Auto)).toInt(), 2);
+    m_bindingMode = static_cast<BindingMode>(value);
+    for (int i = 0; i < 3; ++i) {
+        if (!m_bindingModeActs[i])
+            continue;
+        const QSignalBlocker blocker(m_bindingModeActs[i]);
+        m_bindingModeActs[i]->setChecked(i == value);
+    }
+}
+
+void MainWindow::setBindingMode(BindingMode mode)
+{
+    m_bindingMode = mode;
+    if (!m_epubPath.isEmpty()) {
+        const QString key =
+            QStringLiteral("view/fixedBinding/%1").arg(recentFileKey(m_epubPath));
+        QSettings().setValue(key, static_cast<int>(mode));
+    }
+    updateFixedSpread();
+    updateLocation();
+    updateNavButtons();
+}
+
+int MainWindow::pageTurnStep() const
+{
+    return m_spreadView && m_spreadView->isVisible() ? 2 : 1;
+}
+
+void MainWindow::updateFixedSpread()
+{
+    if (!m_spreadView || !m_readerLayout) {
+        return;
+    }
+
+    bool showCompanion = fixedSpreadEnabled() && m_book && m_currentChapter > 0
+                         && m_currentChapter + 1 < m_book->chapters().size();
+    if (showCompanion) {
+        const Chapter &current = m_book->chapters().at(m_currentChapter);
+        const Chapter &next = m_book->chapters().at(m_currentChapter + 1);
+        showCompanion = next.fixedLayout && current.pageSpread != PageSpread::Center
+                        && next.pageSpread != PageSpread::Center;
+
+        if (showCompanion) {
+            const PageSpread expectedCurrent =
+                rightBinding() ? PageSpread::Right : PageSpread::Left;
+            const PageSpread expectedNext =
+                rightBinding() ? PageSpread::Left : PageSpread::Right;
+            showCompanion =
+                (current.pageSpread == PageSpread::Auto
+                 || current.pageSpread == expectedCurrent)
+                && (next.pageSpread == PageSpread::Auto
+                    || next.pageSpread == expectedNext);
+        }
+    }
+
+    m_readerLayout->setDirection(
+        rightBinding() ? QBoxLayout::RightToLeft : QBoxLayout::LeftToRight);
+    m_spreadView->setVisible(showCompanion);
+    if (!showCompanion)
+        return;
+
+    const Chapter &next = m_book->chapters().at(m_currentChapter + 1);
+    m_spreadView->setZoomFactor(m_fontSize / 100.0);
+    m_spreadView->setUrl(
+        QUrl(EpubSchemeHandler::urlFor(m_schemeId, next.path)));
+}
+
+void MainWindow::requestPageTurn(int direction)
+{
+    if (direction > 0)
+        nextChapter();
+    else if (direction < 0)
+        previousChapter();
+}
+
 void MainWindow::nextChapter()
 {
-    if (m_book && m_currentChapter < m_book->chapters().size() - 1)
-        displayChapter(m_currentChapter + 1);
+    const int step = pageTurnStep();
+    if (m_book && m_currentChapter + step < m_book->chapters().size())
+        displayChapter(m_currentChapter + step);
 }
 
 void MainWindow::previousChapter()
 {
     if (m_book && m_currentChapter > 0)
-        displayChapter(m_currentChapter - 1);
+        displayChapter(qMax(0, m_currentChapter - pageTurnStep()));
 }
 
 void MainWindow::increaseFont()
 {
-    m_fontSize = qMin(m_fontSize + 10, 200);
-    applyZoom();
-    injectViewStyle(); // live-refresh the image-chapter zoom transform, if any
+    adjustZoom(10);
 }
 void MainWindow::decreaseFont()
 {
-    m_fontSize = qMax(m_fontSize - 10, 50);
-    applyZoom();
-    injectViewStyle(); // live-refresh the image-chapter zoom transform, if any
+    adjustZoom(-10);
+}
+
+void MainWindow::adjustZoom(int deltaPercent)
+{
+    if (!m_view)
+        return;
+
+    // Image-only chapters own a separate zoom value which starts at
+    // fit-to-window for every newly opened page. Ask reader.js to consume the
+    // command first; ordinary text chapters fall back to WebEngine page zoom.
+    const QString js = QStringLiteral(
+                           "(function(){var v=window.__spindleImageView;"
+                           "return !!(v&&v.zoomBy&&v.zoomBy(%1));})()")
+                           .arg(QString::number(deltaPercent / 100.0, 'f', 2));
+    QPointer<MainWindow> self(this);
+    m_view->page()->runJavaScript(
+        js, QWebEngineScript::ApplicationWorld,
+        [self, deltaPercent](const QVariant &handled) {
+            if (!self || handled.toBool())
+                return;
+            self->m_fontSize = qBound(50, self->m_fontSize + deltaPercent, 200);
+            self->applyZoom();
+            self->injectViewStyle();
+        });
 }
 void MainWindow::setTheme(int theme)
 {
@@ -2002,6 +2297,15 @@ void MainWindow::runSearch()
     ensureChapterTexts();
     const QVector<SearchHit> hits = searchChapters(m_chapterTexts, query);
 
+    if (!hits.isEmpty()) {
+        const QString countText =
+            hits.size() >= 500
+                ? QStringLiteral("検索結果: %1件（上限）").arg(hits.size())
+                : QStringLiteral("検索結果: %1件").arg(hits.size());
+        auto *summary = new QListWidgetItem(countText, m_searchResults);
+        summary->setFlags(Qt::NoItemFlags);
+    }
+
     QString lastChapter;
     for (const SearchHit &hit : hits) {
         if (hit.chapterPath != lastChapter) {
@@ -2016,6 +2320,11 @@ void MainWindow::runSearch()
             QStringLiteral("…%1%2%3…").arg(hit.snippetBefore, hit.snippetMatch, hit.snippetAfter),
             m_searchResults);
         item->setData(Qt::UserRole, hit.chapterPath);
+        item->setData(Qt::UserRole + 1, hit.start);
+        item->setData(Qt::UserRole + 2, hit.end);
+        item->setToolTip(QStringLiteral("%1 — 位置 %2")
+                             .arg(hit.chapterLabel)
+                             .arg(hit.start + 1));
     }
 
     if (hits.isEmpty())
@@ -2034,12 +2343,40 @@ void MainWindow::onSearchResultActivated(QListWidgetItem *item)
     if (index < 0)
         return;
     const QString query = m_searchInput->text().trimmed();
+    const int start = item->data(Qt::UserRole + 1).toInt();
+    const int end = item->data(Qt::UserRole + 2).toInt();
     if (index != m_currentChapter) {
         m_pendingFind = query;
+        m_pendingSearchStart = start;
+        m_pendingSearchEnd = end;
         displayChapter(index);
     } else {
-        m_view->findText(query);
+        showSearchHit(start, end, query);
     }
+}
+
+void MainWindow::showSearchHit(int start, int end, const QString &fallbackQuery)
+{
+    if (!m_view || start < 0 || end <= start)
+        return;
+
+    // Remove Chromium's previous generic find highlight, then ask reader.js to
+    // select the exact body-text range represented by the chosen book-wide
+    // search result. If a malformed chapter made the offsets diverge, retain
+    // the old query-based find as a safe fallback.
+    m_view->findText(QString());
+    const QString js = QStringLiteral(
+                           "(function(){var s=window.__spindleSearch;"
+                           "return !!(s&&s.show&&s.show(%1,%2));})()")
+                           .arg(start)
+                           .arg(end);
+    QPointer<MainWindow> self(this);
+    m_view->page()->runJavaScript(
+        js, QWebEngineScript::ApplicationWorld,
+        [self, fallbackQuery](const QVariant &handled) {
+            if (self && self->m_view && !handled.toBool() && !fallbackQuery.isEmpty())
+                self->m_view->findText(fallbackQuery);
+        });
 }
 
 // --- highlights ------------------------------------------------------------
@@ -3823,13 +4160,23 @@ void MainWindow::dropEvent(QDropEvent *event)
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 {
+    auto belongsToReader = [obj](QWidget *reader) {
+        for (QObject *current = obj; current; current = current->parent()) {
+            if (current == reader)
+                return true;
+        }
+        return false;
+    };
+    const bool readerEvent =
+        belongsToReader(m_view) || belongsToReader(m_spreadView);
+
     switch (event->type()) {
     case QEvent::ChildAdded:
         // Watch the render widget (and its descendants) as they appear so drops
         // over the page reach us instead of being swallowed by the web view.
         if (auto *ce = static_cast<QChildEvent *>(event)) {
             if (ce->child() && ce->child()->isWidgetType())
-                ce->child()->installEventFilter(this);
+                installReaderEventFilters(ce->child());
         }
         break;
     case QEvent::DragEnter:
@@ -3843,6 +4190,66 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         if (mimeHasEpub(static_cast<QDropEvent *>(event)->mimeData())) {
             openEpubsFromMime(static_cast<QDropEvent *>(event)->mimeData());
             static_cast<QDropEvent *>(event)->acceptProposedAction();
+            return true;
+        }
+        break;
+    case QEvent::KeyPress:
+        // Fixed-layout pages often have a native width larger than the render
+        // widget. Chromium normally consumes the first arrow key to scroll
+        // that overflow. Page navigation owns Left/Right in this mode, so
+        // intercept before the internal render widget sees the key.
+        if (readerEvent && currentChapterFixedLayout()) {
+            auto *ke = static_cast<QKeyEvent *>(event);
+            if (ke->modifiers() == Qt::NoModifier) {
+                if (ke->key() == Qt::Key_Right) {
+                    nextChapter();
+                    return true;
+                }
+                if (ke->key() == Qt::Key_Left) {
+                    previousChapter();
+                    return true;
+                }
+            }
+        }
+        break;
+    case QEvent::MouseButtonPress:
+        if (readerEvent && currentChapterFixedLayout() && m_readerContainer) {
+            auto *me = static_cast<QMouseEvent *>(event);
+            if (me->button() != Qt::LeftButton)
+                break;
+            const QPoint global = me->globalPosition().toPoint();
+            const QPoint pos = m_readerContainer->mapFromGlobal(global);
+            const int width = m_readerContainer->width();
+            int direction = 0;
+            if (width > 0 && pos.x() <= width * 0.15)
+                direction = rightBinding() ? 1 : -1;
+            else if (width > 0 && pos.x() >= width * 0.85)
+                direction = rightBinding() ? -1 : 1;
+            if (direction != 0) {
+                m_pageTurnPressCaptured = true;
+                m_pageTurnPressDirection = direction;
+                m_pageTurnPressPosition = global;
+                return true;
+            }
+        }
+        break;
+    case QEvent::MouseMove:
+        if (m_pageTurnPressCaptured) {
+            auto *me = static_cast<QMouseEvent *>(event);
+            if ((me->globalPosition().toPoint() - m_pageTurnPressPosition).manhattanLength()
+                > QApplication::startDragDistance()) {
+                m_pageTurnPressDirection = 0;
+            }
+            return true;
+        }
+        break;
+    case QEvent::MouseButtonRelease:
+        if (m_pageTurnPressCaptured) {
+            const int direction = m_pageTurnPressDirection;
+            m_pageTurnPressCaptured = false;
+            m_pageTurnPressDirection = 0;
+            if (direction != 0)
+                requestPageTurn(direction);
             return true;
         }
         break;

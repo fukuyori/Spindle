@@ -495,41 +495,167 @@
     }
   };
 
-  // --- image-only chapter fit ---------------------------------------------
-  // Manga-style EPUBs often have a chapter that is just one full-page image.
-  // When so, tag <html> so it fills the window instead of sitting inside the
-  // normal reading margins (see the html.spindle-image-chapter CSS rules
-  // injected from MainWindow::viewStyleCss). Runs independently of the
-  // QWebChannel bridge, so it applies even before/without it.
-  function applyImageFit() {
-    var body = document.body;
-    if (!body) return;
-    var imgs = body.querySelectorAll("img, svg image");
-    var text = (body.textContent || "").replace(/\s+/g, "");
-    var isImageOnly = imgs.length === 1 && text.length === 0;
-    document.documentElement.classList.toggle("spindle-image-chapter", isImageOnly);
+  // --- fixed-layout page fit ----------------------------------------------
+  // A pre-paginated EPUB page has its own coordinate system (normally declared
+  // by meta viewport). Scale the whole body into the available WebEngine view
+  // so the page never leaves horizontal overflow for Chromium to consume.
+  // This also preserves image/text-overlay alignment in fixed-layout books.
+  var fixedLayoutView = null;
+  var fixedLayoutImage = null;
+
+  function isFixedLayoutDocument() {
+    return getComputedStyle(document.documentElement)
+             .getPropertyValue("--spindle-fixed-layout").trim() === "1";
   }
 
-  // --- image-only chapter drag panning ------------------------------------
-  // Once zoomed beyond fit-to-window (see the A-/A+ zoom on
-  // html.spindle-image-chapter in MainWindow::viewStyleCss) the page
-  // overflows and scrolls; let the user drag with the mouse to pan it, like
-  // an image viewer, instead of hunting for scrollbars. Scoped to image-only
-  // chapters (see applyImageFit) so ordinary text chapters keep normal
-  // click-drag text selection.
-  var panState = null;
-  function isImageChapter() {
-    return document.documentElement.classList.contains("spindle-image-chapter");
+  function fixedViewportSize() {
+    var viewport = document.querySelector('meta[name="viewport" i]');
+    var content = viewport ? (viewport.getAttribute("content") || "") : "";
+    function value(name) {
+      var match = content.match(new RegExp("(?:^|[,;\\s])" + name
+                                           + "\\s*=\\s*([0-9.]+)", "i"));
+      return match ? parseFloat(match[1]) : 0;
+    }
+    var width = value("width");
+    var height = value("height");
+    if (!(width > 0 && height > 0)) {
+      var original = document.querySelector('meta[name="original-resolution" i]');
+      var resolution = original ? (original.getAttribute("content") || "") : "";
+      var dimensions = resolution.match(/([0-9.]+)\s*[xX]\s*([0-9.]+)/);
+      if (dimensions) {
+        width = parseFloat(dimensions[1]);
+        height = parseFloat(dimensions[2]);
+      }
+    }
+    if (!(width > 0 && height > 0)) {
+      fixedLayoutImage = singlePageImage(document.body);
+      var natural = fixedLayoutImage ? imageNaturalSize(fixedLayoutImage) : null;
+      if (natural) {
+        width = natural.width;
+        height = natural.height;
+      }
+    }
+    if (!(width > 0 && height > 0)) {
+      var first = document.body && document.body.firstElementChild;
+      var rect = first ? first.getBoundingClientRect() : document.body.getBoundingClientRect();
+      width = Math.max(rect.width, document.body.scrollWidth);
+      height = Math.max(rect.height, document.body.scrollHeight);
+    }
+    return width > 0 && height > 0 ? { width: width, height: height } : null;
   }
-  // The element whose scrollLeft/Top actually moves the page. NOT simply
-  // document.body: in standards mode, body's overflow:auto propagates to the
-  // viewport and body's own used overflow becomes `visible`, making
-  // body.scrollLeft a silent no-op — the real scroller is then
-  // document.scrollingElement (<html>). Probe for whichever element genuinely
-  // has scrollable overflow right now.
-  function panScroller() {
+
+  function layoutFixedPage() {
+    if (!fixedLayoutView || !document.body) return;
+    var root = document.documentElement;
+    var vw = Math.max(1, root.clientWidth || window.innerWidth);
+    var vh = Math.max(1, root.clientHeight || window.innerHeight);
+    var width = fixedLayoutView.width;
+    var height = fixedLayoutView.height;
+    var scale = Math.min(vw / width, vh / height);
+    var left = Math.max(0, (vw - width * scale) / 2);
+    var top = Math.max(0, (vh - height * scale) / 2);
+
+    root.classList.add("spindle-fixed-layout-page");
+    root.style.setProperty("width", "100%", "important");
+    root.style.setProperty("height", "100%", "important");
+    root.style.setProperty("padding", "0", "important");
+    root.style.setProperty("overflow", "hidden", "important");
+    var body = document.body;
+    body.style.setProperty("position", "absolute", "important");
+    body.style.setProperty("box-sizing", "border-box", "important");
+    body.style.setProperty("width", width + "px", "important");
+    body.style.setProperty("height", height + "px", "important");
+    body.style.setProperty("min-width", "0", "important");
+    body.style.setProperty("min-height", "0", "important");
+    body.style.setProperty("max-width", "none", "important");
+    body.style.setProperty("max-height", "none", "important");
+    body.style.setProperty("max-inline-size", "none", "important");
+    body.style.setProperty("max-block-size", "none", "important");
+    body.style.setProperty("margin", "0", "important");
+    body.style.setProperty("padding", "0", "important");
+    body.style.setProperty("left", left + "px", "important");
+    body.style.setProperty("top", top + "px", "important");
+    body.style.setProperty("overflow", "hidden", "important");
+    body.style.setProperty("transform-origin", "0 0", "important");
+    body.style.setProperty("transform", "scale(" + scale + ")", "important");
+  }
+
+  function applyFixedLayoutFit() {
+    if (!isFixedLayoutDocument() || !document.body) return false;
+    var size = fixedViewportSize();
+    if (!size) return false;
+    fixedLayoutView = size;
+    layoutFixedPage();
+    if (fixedLayoutImage && fixedLayoutImage.tagName.toLowerCase() === "img"
+        && !imageNaturalSize(fixedLayoutImage)) {
+      fixedLayoutImage.addEventListener("load", function () {
+        var natural = imageNaturalSize(fixedLayoutImage);
+        if (!natural) return;
+        fixedLayoutView = natural;
+        layoutFixedPage();
+      }, { once: true });
+    }
+    return true;
+  }
+
+  // --- image-only chapter fit ---------------------------------------------
+  // Manga-style EPUBs often have a chapter that is just one full-page image.
+  // Fit that image's own aspect ratio to the viewport, rather than fitting a
+  // viewport-shaped object-fit box. A new chapter always starts at zoom 1
+  // (fit); image zoom is intentionally separate from the text zoom retained by
+  // C++, so opening a manga page after enlarged text still starts fitted.
+  var imageView = null;
+  var imageLayoutFrame = 0;
+
+  function singlePageImage(body) {
+    var candidates = [];
+    var imgs = body.querySelectorAll("img");
+    for (var i = 0; i < imgs.length; i++) {
+      if (!imgs[i].closest("svg")) candidates.push(imgs[i]);
+    }
+    var svgs = body.querySelectorAll("svg");
+    for (var j = 0; j < svgs.length; j++) {
+      if (!svgs[j].parentElement || !svgs[j].parentElement.closest("svg"))
+        candidates.push(svgs[j]);
+    }
+    if (candidates.length !== 1) return null;
+
+    // Text inside an SVG is part of that image. Any non-whitespace text
+    // outside the candidate means this is an ordinary content chapter.
+    var target = candidates[0];
+    var walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    var node;
+    while ((node = walker.nextNode())) {
+      if (target.contains(node.parentElement)) continue;
+      var parent = node.parentElement;
+      if (parent && /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(parent.tagName)) continue;
+      if ((node.nodeValue || "").replace(/\s+/g, "") !== "") return null;
+    }
+    return target;
+  }
+
+  function imageNaturalSize(target) {
+    if (target.tagName.toLowerCase() === "img") {
+      var iw = target.naturalWidth || parseFloat(target.getAttribute("width"));
+      var ih = target.naturalHeight || parseFloat(target.getAttribute("height"));
+      return iw > 0 && ih > 0 ? { width: iw, height: ih } : null;
+    }
+    var vb = target.viewBox && target.viewBox.baseVal;
+    if (vb && vb.width > 0 && vb.height > 0)
+      return { width: vb.width, height: vb.height };
+    var sw = target.width && target.width.baseVal && target.width.baseVal.value;
+    var sh = target.height && target.height.baseVal && target.height.baseVal.value;
+    if (!(sw > 0 && sh > 0)) {
+      sw = parseFloat(target.getAttribute("width"));
+      sh = parseFloat(target.getAttribute("height"));
+    }
+    return sw > 0 && sh > 0 ? { width: sw, height: sh } : null;
+  }
+
+  function imageScroller() {
     var candidates = [
       document.scrollingElement || document.documentElement,
+      document.documentElement,
       document.body
     ];
     for (var i = 0; i < candidates.length; i++) {
@@ -537,37 +663,240 @@
       if (el && (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight))
         return el;
     }
-    return null; // fit-to-window (zoom <= 100%): nothing to pan
+    return null;
+  }
+
+  function layoutImageView(centerOverflow) {
+    if (!imageView) return;
+    var natural = imageView.natural || imageNaturalSize(imageView.target);
+    if (!natural) return;
+    imageView.natural = natural;
+
+    var root = document.documentElement;
+    var vw = Math.max(1, root.clientWidth || window.innerWidth);
+    var vh = Math.max(1, root.clientHeight || window.innerHeight);
+    var fit = Math.min(vw / natural.width, vh / natural.height);
+    var imageWidth = Math.max(1, natural.width * fit * imageView.zoom);
+    var imageHeight = Math.max(1, natural.height * fit * imageView.zoom);
+    var stageWidth = Math.max(vw, imageWidth);
+    var stageHeight = Math.max(vh, imageHeight);
+
+    var stage = imageView.stage;
+    stage.style.setProperty("--spindle-image-width", imageWidth + "px");
+    stage.style.setProperty("--spindle-image-height", imageHeight + "px");
+    stage.style.setProperty("--spindle-stage-width", stageWidth + "px");
+    stage.style.setProperty("--spindle-stage-height", stageHeight + "px");
+
+    var canPan = stageWidth > vw + 0.5 || stageHeight > vh + 0.5;
+    root.classList.toggle("spindle-image-pannable", canPan);
+    if (centerOverflow && canPan) {
+      var scroller = document.scrollingElement || root;
+      scroller.scrollLeft = Math.max(0, (stageWidth - vw) / 2);
+      scroller.scrollTop = Math.max(0, (stageHeight - vh) / 2);
+    }
+  }
+
+  function scheduleImageLayout(centerOverflow) {
+    if (imageLayoutFrame) cancelAnimationFrame(imageLayoutFrame);
+    imageLayoutFrame = requestAnimationFrame(function () {
+      imageLayoutFrame = 0;
+      layoutImageView(centerOverflow);
+    });
+  }
+
+  function applyImageFit() {
+    var body = document.body;
+    if (!body) return;
+    var target = singlePageImage(body);
+    document.documentElement.classList.toggle("spindle-image-chapter", !!target);
+    if (!target) return;
+
+    var stage = document.createElement("div");
+    stage.id = "__spindle_image_stage";
+    target.classList.add("spindle-image-page");
+    stage.appendChild(target);
+    body.appendChild(stage);
+    imageView = {
+      target: target,
+      stage: stage,
+      zoom: 1,
+      natural: imageNaturalSize(target)
+    };
+
+    if (target.tagName.toLowerCase() === "img"
+        && (!target.complete || !(target.naturalWidth > 0 && target.naturalHeight > 0))) {
+      target.addEventListener("load", function () {
+        imageView.natural = imageNaturalSize(target);
+        scheduleImageLayout(false);
+      }, { once: true });
+    }
+    scheduleImageLayout(false);
+  }
+
+  // --- image-only chapter drag panning ------------------------------------
+  // Once zoomed beyond fit-to-window the stage overflows and scrolls; let the
+  // user drag it like an image viewer. Ordinary chapters retain text selection.
+  var panState = null;
+  function isImageChapter() {
+    return !!imageView;
   }
   function onImagePanStart(e) {
     if (!isImageChapter() || e.button !== 0) return;
-    var el = panScroller();
+    var el = imageScroller();
     if (!el) return;
     panState = { el: el, x: e.clientX, y: e.clientY,
                  scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
-    document.body.style.cursor = "grabbing";
+    document.documentElement.classList.add("spindle-image-panning");
     e.preventDefault(); // suppress native image drag-out and text selection
   }
   function onImagePanMove(e) {
     if (!panState) return;
     panState.el.scrollLeft = panState.scrollLeft - (e.clientX - panState.x);
     panState.el.scrollTop = panState.scrollTop - (e.clientY - panState.y);
+    e.preventDefault();
   }
   function onImagePanEnd() {
     if (!panState) return;
     panState = null;
-    document.body.style.cursor = "";
+    document.documentElement.classList.remove("spindle-image-panning");
   }
   document.addEventListener("mousedown", onImagePanStart);
   document.addEventListener("mousemove", onImagePanMove);
   document.addEventListener("mouseup", onImagePanEnd);
+  window.addEventListener("blur", onImagePanEnd);
+  window.addEventListener("resize", function () {
+    if (fixedLayoutView) layoutFixedPage();
+    else scheduleImageLayout(false);
+  });
   document.addEventListener("dragstart", function (e) {
     if (isImageChapter()) e.preventDefault();
   });
 
+  // Called from the A-/A+ buttons and Ctrl+wheel. Returning false tells C++ to
+  // apply the command to ordinary text zoom instead.
+  window.__spindleImageView = {
+    zoomBy: function (delta) {
+      if (!imageView) return false;
+      var next = Math.max(0.5, Math.min(2, imageView.zoom + delta));
+      if (Math.abs(next - imageView.zoom) < 0.001) return true;
+      imageView.zoom = next;
+      scheduleImageLayout(true);
+      return true;
+    }
+  };
+
+  // --- exact book-search result navigation --------------------------------
+  // C++ searches a plain-text projection of each chapter and sends the chosen
+  // result's UTF-16 body offsets here. Translation nodes are injected later
+  // and are deliberately skipped so they cannot shift those source offsets.
+  function searchSourceTextNodes() {
+    var nodes = [];
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        var parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (parent.closest(".spindle-translation"))
+          return NodeFilter.FILTER_REJECT;
+        if (parent.closest("script,style,noscript,template"))
+          return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var node;
+    while ((node = walker.nextNode())) nodes.push(node);
+    return nodes;
+  }
+
+  function searchPositionAt(nodes, offset, preferPreviousAtBoundary) {
+    var passed = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var next = passed + nodes[i].length;
+      if (offset < next
+          || (offset === next && (preferPreviousAtBoundary || i === nodes.length - 1)))
+        return { node: nodes[i], offset: Math.max(0, offset - passed) };
+      passed = next;
+    }
+    return null;
+  }
+
+  window.__spindleSearch = {
+    show: function (start, end) {
+      if (!(start >= 0 && end > start) || !document.body) return false;
+      var nodes = searchSourceTextNodes();
+      var from = searchPositionAt(nodes, start, false);
+      var to = searchPositionAt(nodes, end, true);
+      if (!from || !to) return false;
+      try {
+        var range = document.createRange();
+        range.setStart(from.node, from.offset);
+        range.setEnd(to.node, to.offset);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        var target = from.node.parentElement;
+        if (target)
+          target.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+  };
+
+  function installFixedPageEdgeTurns() {
+    var press = null;
+
+    function edgeAt(x) {
+      var width = document.documentElement.clientWidth || window.innerWidth;
+      if (!(width > 0)) return 0;
+      if (x <= width * 0.15) return -1;
+      if (x >= width * 0.85) return 1;
+      return 0;
+    }
+
+    document.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0) return;
+      var edge = edgeAt(event.clientX);
+      press = edge ? { id: event.pointerId, x: event.clientX, y: event.clientY, edge: edge } : null;
+    }, true);
+    document.addEventListener("pointermove", function (event) {
+      if (!press || press.id !== event.pointerId) return;
+      if (Math.abs(event.clientX - press.x) + Math.abs(event.clientY - press.y) > 10)
+        press.edge = 0;
+    }, true);
+    document.addEventListener("pointercancel", function (event) {
+      if (press && press.id === event.pointerId) press = null;
+    }, true);
+    document.addEventListener("pointerup", function (event) {
+      if (!press || press.id !== event.pointerId) return;
+      var edge = press.edge;
+      press = null;
+      if (!edge || !window.spindle || !window.spindle.fixedPageEdgeClicked) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.spindle.fixedPageEdgeClicked(edge);
+    }, true);
+  }
+
+  function pageUsesVerticalWriting() {
+    var candidates = [document.documentElement, document.body];
+    var styled = document.querySelectorAll("[style*='writing-mode'],[class]");
+    for (var i = 0; i < styled.length && i < 256; i++)
+      candidates.push(styled[i]);
+    for (var j = 0; j < candidates.length; j++) {
+      if (!candidates[j]) continue;
+      var mode = getComputedStyle(candidates[j]).writingMode || "";
+      if (/^(vertical|sideways)-/i.test(mode))
+        return true;
+    }
+    return false;
+  }
+
   function init() {
     new QWebChannel(qt.webChannelTransport, function (channel) {
       window.spindle = channel.objects.spindle;
+      if (window.__spindleCompanion) return;
+      window.spindle.pageWritingModeDetected(pageUsesVerticalWriting());
       window.spindle.highlightsChanged.connect(applyAll);
       window.spindle.translateViewChanged.connect(onTranslateView);
       window.spindle.translationReady.connect(onTranslation);
@@ -582,7 +911,11 @@
     document.addEventListener("mouseup", onMouseUp);
   }
 
-  applyImageFit();
+  var fixedLayoutPage = applyFixedLayoutFit();
+  if (fixedLayoutPage)
+    installFixedPageEdgeTurns();
+  else
+    applyImageFit();
 
   if (typeof QWebChannel !== "undefined" && typeof qt !== "undefined" && qt.webChannelTransport) {
     init();
