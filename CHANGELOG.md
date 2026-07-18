@@ -4,6 +4,16 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.4] - 2026-07-18
+
+### Fixed
+- **Selection translation works in fixed-layout books.** Text selections that
+  cannot be anchored to a paragraph block (fixed-layout overlay text, SVG
+  text, or chapters whose markup prevented block-id injection) now still open
+  the selection menu with 翻訳 / 要約 / コピー / Web で検索. Highlight colors
+  and notes stay hidden for such selections because character positions cannot
+  be stored for them.
+
 ## [0.6.3] - 2026-07-18
 
 ### Added
@@ -575,6 +585,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.6.4]: https://github.com/fukuyori/Spindle/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/fukuyori/Spindle/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/fukuyori/Spindle/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/fukuyori/Spindle/compare/v0.6.0...v0.6.1

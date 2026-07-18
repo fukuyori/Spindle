@@ -247,20 +247,29 @@
     if (!text.trim()) return;
     if (!document.body.contains(range.startContainer) || !document.body.contains(range.endContainer)) return;
 
+    // A selection that cannot be anchored to a block (fixed-layout overlay
+    // text, SVG text, chapters whose markup defeated block-id injection) still
+    // reaches C++ with block -1: no highlight can be stored, but the text
+    // actions (translate/summarize/copy/search) keep working.
+    function reportUnanchored() {
+      if (window.spindle)
+        window.spindle.selectionMade(-1, "", currentLang || "", 0, 0, text);
+    }
+
     var side = sideOfNode(range.startContainer);
-    if (!side) return;
+    if (!side) return reportUnanchored();
     // A single highlight cannot span original and translation.
-    if (sideOfNode(range.endContainer) !== side) return;
+    if (sideOfNode(range.endContainer) !== side) return reportUnanchored();
 
     var anchor = anchorBlockFor(range.startContainer, side);
-    if (!anchor) return;
+    if (!anchor) return reportUnanchored();
     var block = parseInt(anchor.getAttribute("data-spindle-block"), 10);
-    if (isNaN(block)) return;
+    if (isNaN(block)) return reportUnanchored();
 
     var items = sideOffsetList(anchor, side, Infinity);
     var start = boundaryToOffset(items, range.startContainer, range.startOffset, true);
     var end = boundaryToOffset(items, range.endContainer, range.endOffset, false);
-    if (start === null || end === null || start >= end) return;
+    if (start === null || end === null || start >= end) return reportUnanchored();
 
     if (window.spindle)
       window.spindle.selectionMade(block, side, currentLang || "", start, end - start, text);

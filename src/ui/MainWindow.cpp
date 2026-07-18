@@ -2384,7 +2384,12 @@ void MainWindow::showSearchHit(int start, int end, const QString &fallbackQuery)
 void MainWindow::onWebSelection(int block, const QString &side, const QString &lang, int offset,
                                 int length, const QString &text)
 {
-    if (!m_book || m_currentChapter < 0 || text.trimmed().isEmpty() || length <= 0)
+    if (!m_book || m_currentChapter < 0 || text.trimmed().isEmpty())
+        return;
+    // block -1 = selection the page script could not anchor to a leaf block
+    // (fixed-layout overlay/SVG text): text actions only, no highlight storage.
+    const bool anchored = block >= 0 && length > 0;
+    if (!anchored && block >= 0)
         return;
     const HighlightSide hside = highlightSideFromString(side);
     // A translation-side highlight belongs to the language currently displayed.
@@ -2392,14 +2397,17 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
         hside == HighlightSide::Translation ? (lang.isEmpty() ? m_trTarget : lang) : QString();
 
     QMenu menu;
-    const HighlightColor colors[] = {HighlightColor::Yellow, HighlightColor::Blue,
-                                     HighlightColor::Pink, HighlightColor::Orange,
-                                     HighlightColor::Green, HighlightColor::Purple};
     QHash<QAction *, HighlightColor> map;
-    for (HighlightColor c : colors)
-        map.insert(menu.addAction(swatchIcon(c), highlightLabel(c)), c);
-    menu.addSeparator();
-    QAction *withNote = menu.addAction(QStringLiteral("＋ ノート付きで追加…"));
+    QAction *withNote = nullptr;
+    if (anchored) {
+        const HighlightColor colors[] = {HighlightColor::Yellow, HighlightColor::Blue,
+                                         HighlightColor::Pink, HighlightColor::Orange,
+                                         HighlightColor::Green, HighlightColor::Purple};
+        for (HighlightColor c : colors)
+            map.insert(menu.addAction(swatchIcon(c), highlightLabel(c)), c);
+        menu.addSeparator();
+        withNote = menu.addAction(QStringLiteral("＋ ノート付きで追加…"));
+    }
     QAction *translateAction = menu.addAction(QStringLiteral("🌐 翻訳"));
     QAction *summaryAction = menu.addAction(QStringLiteral("要約"));
     QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
