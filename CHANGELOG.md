@@ -4,6 +4,26 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.6] - 2026-07-19
+
+### Fixed
+- **Facing pages meet cleanly at the spine.** Each page of a spread now
+  edge-aligns toward the center instead of centering in its own half, the 2px
+  seam between the two views is gone, and the page-fit measurement no longer
+  loses the width of the pre-fit scrollbar — which had left a theme-colored
+  strip at the spine.
+- **Page turns can no longer leave pages unscaled.** Navigating quickly could
+  occasionally skip the reader-script injection, showing the raw page at
+  natural size with scrollbars. The injected-script collections are now only
+  rewritten when their content actually changes, and every finished load
+  verifies the fixed-layout fit, re-injecting the script if it never ran.
+- **Backward navigation keeps the established spread pairing.** Spread pairs
+  are anchored at the front of the book, so stepping back from a lone final
+  page rejoins the canonical pairs instead of shifting every spread by one.
+- **Arrow keys follow the reading direction on fixed-layout pages.** In
+  right-bound books ← advances and → goes back, matching the edge-click
+  mapping.
+
 ## [0.6.5] - 2026-07-18
 
 ### Changed
@@ -600,6 +620,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.6.6]: https://github.com/fukuyori/Spindle/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/fukuyori/Spindle/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/fukuyori/Spindle/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/fukuyori/Spindle/compare/v0.6.2...v0.6.3

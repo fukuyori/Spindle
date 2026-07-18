@@ -1172,7 +1172,9 @@ void MainWindow::ensureWebView()
     m_readerContainer = new QWidget(this);
     m_readerLayout = new QHBoxLayout(m_readerContainer);
     m_readerLayout->setContentsMargins(0, 0, 0, 0);
-    m_readerLayout->setSpacing(2);
+    // No seam between the two views: a fixed-layout spread must join at the
+    // spine with the pages touching.
+    m_readerLayout->setSpacing(0);
 
     auto *view = new ReaderView(m_readerContainer);
     view->onImageContextMenu = [this](const QPoint &globalPos, const QUrl &mediaUrl) {
@@ -1228,6 +1230,10 @@ void MainWindow::ensureWebView()
     companionMarker.setRunsOnSubFrames(false);
     m_spreadView->page()->scripts().insert(companionMarker);
     installReaderScript(m_spreadView);
+    connect(m_spreadView, &QWebEngineView::loadFinished, this, [this](bool ok) {
+        if (ok)
+            ensureFixedFit(m_spreadView);
+    });
     m_spreadView->hide();
 
     // After BOTH views exist: setupWebChannel()/injectViewStyle() wire the
@@ -1751,10 +1757,12 @@ void MainWindow::displayChapter(int index, const QString &fragment)
     if (!fragment.isEmpty())
         urlStr += QLatin1Char('#') + fragment;
     injectViewStyle(); // refresh the pre-paint style script before navigating
+    // Spread layout + spine-alignment scripts must be in place before the
+    // navigation starts so the DocumentCreation injection sees them.
+    updateFixedSpread();
     m_view->setUpdatesEnabled(false); // hold the old frame until the load ends
     m_viewUnfreeze->start();
     m_view->setUrl(QUrl(urlStr));
-    updateFixedSpread();
 
     updateLocation();
     updateNavButtons();
@@ -1775,6 +1783,7 @@ void MainWindow::onLoadFinished(bool ok)
         return;
     applyZoom();
     injectViewStyle();
+    ensureFixedFit(m_view);
 
     if (!m_pendingFragment.isEmpty()) {
         const QString frag = m_pendingFragment;
@@ -1937,6 +1946,12 @@ void MainWindow::updateThemeScript(const QString &css)
 {
     if (!m_view)
         return;
+    // Rewriting the script collection while a navigation is in flight can make
+    // QtWebEngine skip other pending injections (the reader script most
+    // importantly), so never touch the collection for a no-op update.
+    if (css == m_lastThemeScriptCss)
+        return;
+    m_lastThemeScriptCss = css;
     QWebEngineScriptCollection &scripts = m_view->page()->scripts();
     const QList<QWebEngineScript> existing = scripts.find(QStringLiteral("spindle-theme"));
     for (const QWebEngineScript &s : existing)
@@ -2124,35 +2139,126 @@ int MainWindow::pageTurnStep() const
     return m_spreadView && m_spreadView->isVisible() ? 2 : 1;
 }
 
+// True when chapters `first` and `first + 1` may render side by side as one
+// spread (both fixed layout, and their page-spread properties are compatible
+// with the current binding direction). The cover (chapter 0) never pairs.
+bool MainWindow::canPairChapters(int first) const
+{
+    if (!m_book || first <= 0 || first + 1 >= m_book->chapters().size())
+        return false;
+    const Chapter &current = m_book->chapters().at(first);
+    const Chapter &next = m_book->chapters().at(first + 1);
+    if (!current.fixedLayout || !next.fixedLayout)
+        return false;
+    if (current.pageSpread == PageSpread::Center
+        || next.pageSpread == PageSpread::Center)
+        return false;
+    const PageSpread expectedCurrent =
+        rightBinding() ? PageSpread::Right : PageSpread::Left;
+    const PageSpread expectedNext =
+        rightBinding() ? PageSpread::Left : PageSpread::Right;
+    return (current.pageSpread == PageSpread::Auto
+            || current.pageSpread == expectedCurrent)
+           && (next.pageSpread == PageSpread::Auto
+               || next.pageSpread == expectedNext);
+}
+
+// Spread pairing is anchored at the front of the book (cover alone, then
+// pairs in order), so every chapter maps to one canonical spread start.
+// Without this anchor, stepping back from a lone last page would re-pair
+// (n-1, n) and shift every spread the reader had already seen.
+int MainWindow::spreadStartFor(int chapter) const
+{
+    if (!m_book || m_xmlView || !m_spreadAction || !m_spreadAction->isChecked())
+        return chapter;
+    int c = 0;
+    while (c < chapter) {
+        if (canPairChapters(c)) {
+            if (c + 1 == chapter)
+                return c; // `chapter` is the second member of this pair
+            c += 2;
+        } else {
+            ++c;
+        }
+    }
+    return chapter;
+}
+
+void MainWindow::applyFixedAlign(QWebEngineView *view, const QString &align)
+{
+    if (!view)
+        return;
+    // Same rationale as updateThemeScript: page turns call this constantly
+    // with an unchanged value while loads are in flight — leave the script
+    // collection alone unless the alignment actually changed.
+    if (m_appliedFixedAlign.value(view) == align)
+        return;
+    m_appliedFixedAlign.insert(view, align);
+    QWebEngineScriptCollection &scripts = view->page()->scripts();
+    const QList<QWebEngineScript> existing =
+        scripts.find(QStringLiteral("spindle-fixed-align"));
+    for (const QWebEngineScript &s : existing)
+        scripts.remove(s);
+    QWebEngineScript s;
+    s.setName(QStringLiteral("spindle-fixed-align"));
+    s.setSourceCode(
+        QStringLiteral("window.__spindleFixedAlign = '%1';").arg(align));
+    s.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    s.setWorldId(QWebEngineScript::ApplicationWorld);
+    s.setRunsOnSubFrames(false);
+    scripts.insert(s);
+    // Also reflect it into the page that is already loaded (binding/spread
+    // toggles must not require a navigation to take effect).
+    view->page()->runJavaScript(
+        QStringLiteral(
+            "window.__spindleSetFixedAlign && window.__spindleSetFixedAlign('%1');")
+            .arg(align),
+        QWebEngineScript::ApplicationWorld);
+}
+
+// Post-load safety net for fixed-layout pages. QtWebEngine can occasionally
+// skip DocumentReady script injection when navigations come in quick
+// succession; the page then shows at natural size with scrollbars. Ask the
+// page to re-fit; if the reader script never ran there, inject it now.
+void MainWindow::ensureFixedFit(QWebEngineView *view)
+{
+    if (!view)
+        return;
+    QPointer<QWebEngineView> v(view);
+    view->page()->runJavaScript(
+        QStringLiteral("!!(window.__spindleFixedRefit && window.__spindleFixedRefit())"),
+        QWebEngineScript::ApplicationWorld, [v](const QVariant &scriptRan) {
+            if (!v || scriptRan.toBool())
+                return;
+            QFile f(QStringLiteral(":/reader.js"));
+            if (f.open(QIODevice::ReadOnly))
+                v->page()->runJavaScript(QString::fromUtf8(f.readAll()),
+                                         QWebEngineScript::ApplicationWorld);
+        });
+}
+
 void MainWindow::updateFixedSpread()
 {
     if (!m_spreadView || !m_readerLayout) {
         return;
     }
 
-    bool showCompanion = fixedSpreadEnabled() && m_book && m_currentChapter > 0
-                         && m_currentChapter + 1 < m_book->chapters().size();
-    if (showCompanion) {
-        const Chapter &current = m_book->chapters().at(m_currentChapter);
-        const Chapter &next = m_book->chapters().at(m_currentChapter + 1);
-        showCompanion = next.fixedLayout && current.pageSpread != PageSpread::Center
-                        && next.pageSpread != PageSpread::Center;
-
-        if (showCompanion) {
-            const PageSpread expectedCurrent =
-                rightBinding() ? PageSpread::Right : PageSpread::Left;
-            const PageSpread expectedNext =
-                rightBinding() ? PageSpread::Left : PageSpread::Right;
-            showCompanion =
-                (current.pageSpread == PageSpread::Auto
-                 || current.pageSpread == expectedCurrent)
-                && (next.pageSpread == PageSpread::Auto
-                    || next.pageSpread == expectedNext);
-        }
-    }
+    const bool showCompanion = fixedSpreadEnabled() && m_book
+                               && spreadStartFor(m_currentChapter) == m_currentChapter
+                               && canPairChapters(m_currentChapter);
 
     m_readerLayout->setDirection(
         rightBinding() ? QBoxLayout::RightToLeft : QBoxLayout::LeftToRight);
+
+    // Join the spread at the spine: each page hugs its inner edge instead of
+    // centering in its own half. Single-page display stays centered.
+    applyFixedAlign(m_view,
+                    showCompanion ? (rightBinding() ? QStringLiteral("left")
+                                                    : QStringLiteral("right"))
+                                  : QStringLiteral("center"));
+    applyFixedAlign(m_spreadView, rightBinding() ? QStringLiteral("right")
+                                                 : QStringLiteral("left"));
+
     m_spreadView->setVisible(showCompanion);
     if (!showCompanion)
         return;
@@ -2180,8 +2286,11 @@ void MainWindow::nextChapter()
 
 void MainWindow::previousChapter()
 {
+    // Land on the canonical start of the previous spread (not a fixed -1/-2
+    // step): stepping back from a lone last page must rejoin the established
+    // pairing instead of shifting it.
     if (m_book && m_currentChapter > 0)
-        displayChapter(qMax(0, m_currentChapter - pageTurnStep()));
+        displayChapter(spreadStartFor(m_currentChapter - 1));
 }
 
 void MainWindow::increaseFont()
@@ -4238,12 +4347,14 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         if (readerEvent && currentChapterFixedLayout()) {
             auto *ke = static_cast<QKeyEvent *>(event);
             if (ke->modifiers() == Qt::NoModifier) {
+                // Right-bound books read right-to-left: Left advances,
+                // Right goes back (matches the edge-click mapping).
                 if (ke->key() == Qt::Key_Right) {
-                    nextChapter();
+                    requestPageTurn(rightBinding() ? -1 : 1);
                     return true;
                 }
                 if (ke->key() == Qt::Key_Left) {
-                    previousChapter();
+                    requestPageTurn(rightBinding() ? 1 : -1);
                     return true;
                 }
             }
@@ -4998,11 +5109,19 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
     }
     switch (event->key()) {
     case Qt::Key_Right:
+        if (currentChapterFixedLayout())
+            requestPageTurn(rightBinding() ? -1 : 1);
+        else
+            nextChapter();
+        break;
     case Qt::Key_Space:
         nextChapter();
         break;
     case Qt::Key_Left:
-        previousChapter();
+        if (currentChapterFixedLayout())
+            requestPageTurn(rightBinding() ? 1 : -1);
+        else
+            previousChapter();
         break;
     default:
         QMainWindow::keyPressEvent(event);

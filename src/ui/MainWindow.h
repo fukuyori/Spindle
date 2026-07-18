@@ -170,6 +170,14 @@ private:
     void loadBindingMode();
     void setBindingMode(BindingMode mode);
     int pageTurnStep() const;
+    bool canPairChapters(int first) const;
+    int spreadStartFor(int chapter) const;
+    void applyFixedAlign(QWebEngineView *view, const QString &align);
+    void ensureFixedFit(QWebEngineView *view);
+    // Last-applied injected-script state, kept to avoid rewriting the script
+    // collections during navigation (see updateThemeScript/applyFixedAlign).
+    QString m_lastThemeScriptCss;
+    QHash<QWebEngineView *, QString> m_appliedFixedAlign;
     void updateFixedSpread();
     void requestPageTurn(int direction);
     void updatePlaceholderBackground(); // keep the placeholder themed while shown

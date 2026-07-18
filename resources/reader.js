@@ -517,6 +517,18 @@
   var fixedLayoutView = null;
   var fixedLayoutImage = null;
 
+  // Horizontal placement of the fitted page inside this view. In spread mode
+  // C++ sets "left"/"right" so the two pages meet at the spine; single-page
+  // display stays "center". Injected pre-load as window.__spindleFixedAlign
+  // and updated live through window.__spindleSetFixedAlign below.
+  var fixedAlign = (window.__spindleFixedAlign === "left"
+                    || window.__spindleFixedAlign === "right")
+                     ? window.__spindleFixedAlign : "center";
+  window.__spindleSetFixedAlign = function (align) {
+    fixedAlign = (align === "left" || align === "right") ? align : "center";
+    if (fixedLayoutView) layoutFixedPage();
+  };
+
   function isFixedLayoutDocument() {
     return getComputedStyle(document.documentElement)
              .getPropertyValue("--spindle-fixed-layout").trim() === "1";
@@ -561,19 +573,26 @@
   function layoutFixedPage() {
     if (!fixedLayoutView || !document.body) return;
     var root = document.documentElement;
-    var vw = Math.max(1, root.clientWidth || window.innerWidth);
-    var vh = Math.max(1, root.clientHeight || window.innerHeight);
-    var width = fixedLayoutView.width;
-    var height = fixedLayoutView.height;
-    var scale = Math.min(vw / width, vh / height);
-    var left = Math.max(0, (vw - width * scale) / 2);
-    var top = Math.max(0, (vh - height * scale) / 2);
-
+    // Apply the root styles BEFORE measuring: until the page is scaled the
+    // oversized body shows a viewport scrollbar, and a clientWidth read at
+    // that moment is short by the scrollbar width — leaving a background
+    // strip at the spine when the page is edge-aligned in spread mode.
     root.classList.add("spindle-fixed-layout-page");
     root.style.setProperty("width", "100%", "important");
     root.style.setProperty("height", "100%", "important");
     root.style.setProperty("padding", "0", "important");
     root.style.setProperty("overflow", "hidden", "important");
+    var vw = Math.max(1, root.clientWidth || window.innerWidth);
+    var vh = Math.max(1, root.clientHeight || window.innerHeight);
+    var width = fixedLayoutView.width;
+    var height = fixedLayoutView.height;
+    var scale = Math.min(vw / width, vh / height);
+    var scaledWidth = width * scale;
+    var left = fixedAlign === "left" ? 0
+             : fixedAlign === "right" ? Math.max(0, vw - scaledWidth)
+             : Math.max(0, (vw - scaledWidth) / 2);
+    var top = Math.max(0, (vh - height * scale) / 2);
+
     var body = document.body;
     body.style.setProperty("position", "absolute", "important");
     body.style.setProperty("box-sizing", "border-box", "important");
@@ -930,6 +949,21 @@
     installFixedPageEdgeTurns();
   else
     applyImageFit();
+
+  // Safety net, called by C++ after every load: re-run the fixed-layout fit
+  // (or apply it for the first time if the DocumentReady injection ran before
+  // the page was measurable). Its existence also tells C++ that this script
+  // did run in this document — if the call reports undefined, C++ re-injects
+  // the whole script.
+  window.__spindleFixedRefit = function () {
+    if (fixedLayoutPage) {
+      layoutFixedPage();
+    } else if (isFixedLayoutDocument()) {
+      fixedLayoutPage = applyFixedLayoutFit();
+      if (fixedLayoutPage) installFixedPageEdgeTurns();
+    }
+    return true;
+  };
 
   if (typeof QWebChannel !== "undefined" && typeof qt !== "undefined" && qt.webChannelTransport) {
     init();
