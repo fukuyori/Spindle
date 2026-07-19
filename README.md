@@ -12,6 +12,9 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 
 ## Features
 
+- **Bilingual UI (English / Japanese)** — the interface follows the system
+  language (Japanese system → Japanese UI, anything else → English) and can be
+  forced from **View → Language / 言語** (applied after a restart).
 - **EPUB 2/3** loading (in-memory unzip via miniz; OPF / spine / metadata
   parsed with Qt XML).
 - **Table of contents** — EPUB 3 `nav` document preferred, NCX fallback,
@@ -40,8 +43,8 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   list, and delete. Highlights are anchored to a document-order block and a
   character range within the chosen side (original *or* translation) and are
   shown only on that side (character-precise, never mirrored). The list marks
-  each one ［原］/［訳］ and jumps to its block even when that side isn't shown.
-  Saved next to the EPUB.
+  each one [O]/[T] (original/translation) and jumps to its block even when that
+  side isn't shown. Saved next to the EPUB.
 - **Markdown / JSON** highlight export & import.
 - **Kindle Notebook** (HTML) import, matched onto chapter blocks.
 - **Aozora Bunko XHTML** export of the current chapter (ruby preserved, images
@@ -62,7 +65,7 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Translation glossary** — an optional `<book>.glossary.json` fixes the
   target wording of chosen terms (names, jargon) for consistent translations
   and summaries. Only entries that appear in the current text are sent to the
-  model. 翻訳 > 用語集を生成… builds the file automatically: Ollama extracts
+  model. **Translation → Generate Glossary…** builds the file automatically: Ollama extracts
   proper nouns and recurring terms from the current chapter or the whole book
   and proposes target wordings, merged into the existing glossary (existing
   entries are kept).
@@ -76,11 +79,11 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   the language, the spoken paragraph tinted and kept in view, ruby text spoken
   as its reading, and optional auto-advance to the next chapter. Speed and a
   per-language voice are configurable; play/pause/stop from the toolbar or the
-  読み上げ menu. Besides the OS voices, a running
+  Read Aloud menu. Besides the OS voices, a running
   [VOICEVOX](https://voicevox.hiroshiba.jp) server (Japanese) and local
   [Piper](https://github.com/rhasspy/piper) voice models (multi-language) can
-  be selected per language in 読み上げ > 音声設定. The current chapter can
-  also be exported to a WAV audio file with the same voices.
+  be selected per language in **Read Aloud → Voice Settings…**. The current
+  chapter can also be exported to a WAV audio file with the same voices.
 - **XHTML source view** — toggle the current chapter between the rendered view
   and its raw markup.
 - **Comfortable reading margins** and a collapsible sidebar.
@@ -90,7 +93,7 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 
 ## Usage
 
-Open an EPUB from **ファイル → EPUB を開く**, by dragging a `.epub` onto a
+Open an EPUB from **File → Open EPUB…**, by dragging a `.epub` onto a
 window (including onto the reading area), or by passing one or more paths on the
 command line. A drop opens in the current window if it has no book yet, otherwise
 in a new window, so you can read several at once.
@@ -102,25 +105,28 @@ in a new window, so you can read several at once.
 | Focus search | `Cmd` / `Ctrl` + `F` |
 | Read aloud / pause | `Ctrl` + `Shift` + `S` |
 
-- **Sidebar:** toggle the left pane with **サイドバー**. Use **履歴** to show the
+- **UI language:** **View → Language / 言語** switches between Automatic
+  (follow the system), 日本語, and English; the choice applies after a restart.
+- **Sidebar:** toggle the left pane with **Sidebar**. Use **History** to show the
   recent EPUB list in that pane; opening a history item keeps the pane visible
   and switches it back to the table of contents.
-- **Brightness:** choose **表示 → 明るさ調整…** to adjust the current theme, or
-  select another theme in the dialog. Background, original text, and translated
-  text are saved separately for each theme.
-- **Line wrapping:** choose **表示 → 折り返し設定…** to fit lines to the window
+- **Brightness:** choose **View → Adjust Brightness…** to adjust the current
+  theme, or select another theme in the dialog. Background, original text, and
+  translated text are saved separately for each theme.
+- **Line wrapping:** choose **View → Wrap Settings…** to fit lines to the window
   or limit them to a selected measure of 10–120 characters (initially 40).
   The saved preference also applies to vertical writing.
-- **Fixed layout:** use **表示 → 固定レイアウトを見開き表示** to toggle spreads,
-  and **表示 → 固定レイアウトの綴じ方向** to choose automatic, right-bound,
+- **Fixed layout:** use **View → Fixed-Layout Facing Pages** to toggle spreads,
+  and **View → Fixed-Layout Binding Direction** to choose automatic, right-bound,
   or left-bound. Binding is saved per EPUB in Spindle's settings; the EPUB file
   itself is never modified.
 - **Highlight:** select text → pick a colour from the popup (which also offers
   Copy, Translate, Summarize, and Search the web). Click an existing highlight
   to copy it, search it on the web, change its colour, edit its note, or delete it.
-- **Translation:** choose **AI → 翻訳設定…**, choose a mode (original / bilingual /
-  translation), set the model + target language, and press 再翻訳; or select
-  text and choose **🌐 翻訳** to translate just that selection (the result popup
+- **Translation:** choose **AI → Translation Settings…**, choose a mode (original /
+  bilingual / translation), set the model + target language, and press
+  **Retranslate**; or select text and choose **🌐 Translate** to translate just
+  that selection (the result popup
   closes on Escape or an outside click). Requires a running Ollama instance with
   the chosen model installed (default `qwen2.5`).
   - **Parallel translation:** chapter translation sends up to 2 requests at once,
@@ -133,38 +139,40 @@ in a new window, so you can read several at once.
     ```
     Spindle's default endpoint `http://localhost:11434` then works unchanged. On a
     single GPU the gain is partial (both requests share it), not a full 2×.
-- **Summary:** choose **AI → 現在の章を要約** or **要約 → 現在の章を要約**.
-  Existing saved summaries for the current chapter, target language, and detail
-  level are opened immediately; use **現在の章を再要約** to regenerate. The
-  summary model is configured from **要約 → 設定…**.
-- **Export a translated book:** **翻訳 → 対訳 EPUB を書き出し / 訳文 EPUB を書き出し**
+- **Summary:** choose **AI → Summarize Current Chapter** or **Summary →
+  Summarize Current Chapter**. Existing saved summaries for the current chapter,
+  target language, and detail level are opened immediately; use **Re-summarize
+  Current Chapter** to regenerate. The summary model is configured from
+  **Summary → Settings…**.
+- **Export a translated book:** **Translation → Export Bilingual EPUB… /
+  Export Translated EPUB…**
   builds a new `.epub` from the cached translations (any not-yet-translated
   paragraphs are translated first, with a cancelable progress dialog). If Ollama
   stops without producing text, Spindle saves the exact source paragraph and
   request conditions to a diagnostic file next to the EPUB.
 - **Source view:** the **XML** button shows the chapter's raw XHTML.
-- **Read-aloud:** press **▶ 読み上げ** on the toolbar (or `Ctrl+Shift+S`) to
+- **Read-aloud:** press **▶ Read Aloud** on the toolbar (or `Ctrl+Shift+S`) to
   speak the current chapter from the paragraph on screen; press again to
-  pause/resume, **■ 停止** to stop. The original and bilingual views read the
-  original text, the translation view reads the translation. 読み上げ →
-  章末で次の章へ進む keeps reading across chapters.
-- **Voices:** **読み上げ → 音声設定…** sets the speech rate and one voice per
-  language. OS voices work out of the box (add more in the OS language
+  pause/resume, **■ Stop** to stop. The original and bilingual views read the
+  original text, the translation view reads the translation. **Read Aloud →
+  Continue to Next Chapter at End** keeps reading across chapters.
+- **Voices:** **Read Aloud → Voice Settings…** sets the speech rate and one
+  voice per language. OS voices work out of the box (add more in the OS language
   settings). To use local AI voices:
   - **VOICEVOX** (Japanese): start the VOICEVOX app/engine, press
-    音声一覧を更新, and pick a `VOICEVOX: …` speaker. Endpoint defaults to
-    `http://localhost:50021`.
-  - **Piper** (multi-language): point Piper 実行ファイル at `piper.exe` and
-    Piper 音声フォルダ at a folder of `.onnx` voice models (keep the original
+    **Refresh Voice List**, and pick a `VOICEVOX: …` speaker. Endpoint defaults
+    to `http://localhost:50021`.
+  - **Piper** (multi-language): point **Piper executable** at `piper.exe` and
+    **Piper voice folder** at a folder of `.onnx` voice models (keep the original
     `en_US-…`-style file names — that's how languages are detected, and keep
-    each model's `.onnx.json` next to it), then press 音声一覧を更新 and pick
-    a `Piper: …` voice.
-- **Audio-file export:** **読み上げ → 章を音声ファイルへ書き出し…** renders the
-  current chapter to an audio file with the same voices and 原文/訳文 rule as
-  playback (progress dialog with cancel; paragraphs are joined with a short
+    each model's `.onnx.json` next to it), then press **Refresh Voice List** and
+    pick a `Piper: …` voice.
+- **Audio-file export:** **Read Aloud → Export Chapter to Audio File…** renders
+  the current chapter to an audio file with the same voices and original/translation
+  rule as playback (progress dialog with cancel; paragraphs are joined with a short
   pause). WAV needs nothing extra; choosing **MP3 / M4A** encodes through
   [ffmpeg](https://ffmpeg.org) — installed on PATH or pointed to in
-  読み上げ > 音声設定.
+  **Read Aloud → Voice Settings…**.
 
 ### Sidecar files
 
@@ -176,14 +184,14 @@ For a book `Foo.epub`, files are named after the base name `Foo`:
 |------|----------|
 | `<book>.highlights.json` | highlights & notes |
 | `<book>.<lang>.json` | translation cache for a target language (e.g. `Foo.ja.json`) |
-| `<book>.glossary.json` | optional glossary (hand-written, or generated via 翻訳 > 用語集を生成…) |
+| `<book>.glossary.json` | optional glossary (hand-written, or generated via Translation → Generate Glossary…) |
 | `<book>.summaries.json` | saved chapter summaries |
 
 #### Glossary format
 
 Create `<book>.glossary.json` next to the book (for `Changeling.epub`, the
-file is `Changeling.glossary.json`), or let 翻訳 > 用語集を生成… generate it
-from the text. One file holds a single
+file is `Changeling.glossary.json`), or let **Translation → Generate Glossary…**
+generate it from the text. One file holds a single
 source→target language pair and fixes how chosen terms are translated:
 
 ```json
@@ -229,6 +237,10 @@ Optional Qt modules (the build works without them, minus the feature):
   `qt6-speech-dev` (runtime uses `speech-dispatcher`).
 - **Qt Multimedia** — audio playback for the local AI voices (VOICEVOX /
   Piper) and the audio-file export.
+- **Qt Linguist tools** (LinguistTools) — compiles the English UI catalog
+  (`i18n/spindle_en.ts`) into the binary; without it the app builds with the
+  Japanese UI only. After changing source strings, refresh the catalog with
+  the `update_translations` CMake target.
 
 ### macOS (Homebrew)
 
@@ -312,6 +324,7 @@ src/
 │            playback controller, WAV utilities
 └── ui/      main window (QWebEngineView reader + sidebar/toolbar)
 resources/   reader.js (injected), app icon, Qt resource file
+i18n/        UI translation catalog (spindle_en.ts; source strings are Japanese)
 packaging/   Linux .desktop entry
 scripts/     build & packaging scripts (see scripts/README.md)
 third_party/ vendored miniz

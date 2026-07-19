@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Spindle VERSION 0.6.6 LANGUAGES C CXX)
+project(Spindle VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +21,9 @@ if(APPLE AND NOT CMAKE_PREFIX_PATH)
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Xml WebEngineWidgets WebChannel Concurrent)
+# UI translations (Japanese source strings, English catalog). Optional so the
+# app still builds — Japanese-only — where lupdate/lrelease are not installed.
+find_package(Qt6 COMPONENTS LinguistTools QUIET)
 # Read-aloud uses Qt TextToSpeech (OS voices) when present; without it the app
 # still builds, with the 読み上げ actions reporting no speech engine.
 find_package(Qt6 COMPONENTS TextToSpeech QUIET)
@@ -126,6 +129,14 @@ endif()
 # This is a Widgets/WebEngine app with no QML sources. Skipping Qt's QML import
 # scanner avoids running an unnecessary host tool during configure/build.
 set_target_properties(spindle PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
+
+if(Qt6LinguistTools_FOUND)
+  # Compiles i18n/spindle_en.ts into the binary under ":/i18n". Refresh the
+  # .ts from sources with the generated `update_translations` target.
+  qt_add_translations(spindle TS_FILES i18n/spindle_en.ts)
+else()
+  message(WARNING "Qt LinguistTools not found - building without English UI translation")
+endif()
 
 target_include_directories(spindle PRIVATE src)
 

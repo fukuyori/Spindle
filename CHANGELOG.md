@@ -4,6 +4,17 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-07-19
+
+### Added
+- **Bilingual UI (Japanese / English).** All menu, toolbar, dialog, and status
+  strings are now translatable. The UI language follows the system locale
+  (Japanese system → Japanese UI, anything else → English) and can be forced
+  via the new 表示 → 言語 / Language menu (applied after restart). Source
+  strings remain Japanese; the English catalog lives in `i18n/spindle_en.ts`
+  (refresh with the `update_translations` CMake target, compiled into the
+  binary by lrelease at build time).
+
 ## [0.6.6] - 2026-07-19
 
 ### Fixed
@@ -620,6 +631,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.7.0]: https://github.com/fukuyori/Spindle/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/fukuyori/Spindle/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/fukuyori/Spindle/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/fukuyori/Spindle/compare/v0.6.3...v0.6.4

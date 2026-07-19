@@ -5,7 +5,10 @@
 #include <QFileInfo>
 #include <QFileOpenEvent>
 #include <QIcon>
+#include <QLocale>
+#include <QSettings>
 #include <QTimer>
+#include <QTranslator>
 
 namespace {
 
@@ -50,6 +53,20 @@ int main(int argc, char *argv[])
 #if defined(Q_OS_LINUX)
     app.setDesktopFileName(QStringLiteral("spindle"));
 #endif
+
+    // UI language. Source strings are Japanese; the English catalog is loaded
+    // for non-Japanese locales (or when 表示 > 言語 forces English).
+    const QString uiLang =
+        QSettings().value(QStringLiteral("view/language"), QStringLiteral("auto")).toString();
+    const bool wantEnglish =
+        uiLang == QLatin1String("en")
+        || (uiLang != QLatin1String("ja")
+            && QLocale::system().language() != QLocale::Japanese);
+    if (wantEnglish) {
+        auto *translator = new QTranslator(&app);
+        if (translator->load(QStringLiteral(":/i18n/spindle_en")))
+            app.installTranslator(translator);
+    }
 
     // The epub:// handler is installed on the default profile lazily, by the
     // first MainWindow that creates its web view (see ensureWebView). Touching

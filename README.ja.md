@@ -12,6 +12,9 @@ Windows / macOS / Linux に対応します。
 
 ## 機能
 
+- **2ヶ国語 UI（日本語 / 英語）** — システム言語に従って表示言語を自動選択
+  （日本語システムなら日本語、それ以外は英語）。**表示 → 言語 / Language** で
+  固定もできます（再起動後に反映）。
 - **EPUB 2/3** の読み込み（miniz によるメモリ内解凍、OPF / spine /
   メタデータを Qt XML で解析）。
 - **目次** — EPUB 3 の `nav` を優先、NCX にフォールバック、入れ子対応。
@@ -88,6 +91,8 @@ Windows / macOS / Linux に対応します。
 | 検索にフォーカス | `Cmd` / `Ctrl` + `F` |
 | 読み上げ / 一時停止 | `Ctrl` + `Shift` + `S` |
 
+- **表示言語**：**表示 → 言語 / Language** で「自動（システムに従う）/ 日本語 /
+  English」を選べます。変更は再起動後に反映されます。
 - **サイドバー**：**サイドバー** ボタンで左ペインを開閉します。**履歴** で最近開いた
   EPUB を左ペインに表示できます。履歴から本を開くと、左ペインは表示したまま目次に
   戻ります。
@@ -209,6 +214,10 @@ CMake 3.21 以上、C++17 コンパイラが必要です。
   （実行時は `speech-dispatcher` を使用）。
 - **Qt Multimedia** — ローカル AI 音声（VOICEVOX / Piper）の再生と
   音声ファイル書き出しに必要。
+- **Qt Linguist ツール**（LinguistTools）— 英語 UI カタログ
+  （`i18n/spindle_en.ts`）をバイナリに組み込みます。無い場合は日本語 UI のみで
+  ビルドされます。文字列を変更したら CMake の `update_translations`
+  ターゲットでカタログを更新します。
 
 ### macOS（Homebrew）
 
@@ -293,6 +302,7 @@ src/
 │            再生コントローラ、WAV ユーティリティ
 └── ui/      メインウィンドウ（QWebEngineView リーダー + サイドバー/ツールバー）
 resources/   reader.js(注入用)、アプリアイコン、Qt リソースファイル
+i18n/        UI 翻訳カタログ(spindle_en.ts。ソース文字列は日本語)
 packaging/   Linux .desktop エントリ
 scripts/     ビルド・パッケージングスクリプト(scripts/README.md 参照)
 third_party/ vendor 化した miniz

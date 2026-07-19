@@ -241,12 +241,12 @@ QColor highlightQColor(HighlightColor c)
 QString highlightLabel(HighlightColor c)
 {
     switch (c) {
-    case HighlightColor::Yellow: return QStringLiteral("イエロー");
-    case HighlightColor::Blue:   return QStringLiteral("ブルー");
-    case HighlightColor::Pink:   return QStringLiteral("ピンク");
-    case HighlightColor::Orange: return QStringLiteral("オレンジ");
-    case HighlightColor::Green:  return QStringLiteral("グリーン");
-    case HighlightColor::Purple: return QStringLiteral("パープル");
+    case HighlightColor::Yellow: return QCoreApplication::translate("MainWindow", "イエロー");
+    case HighlightColor::Blue:   return QCoreApplication::translate("MainWindow", "ブルー");
+    case HighlightColor::Pink:   return QCoreApplication::translate("MainWindow", "ピンク");
+    case HighlightColor::Orange: return QCoreApplication::translate("MainWindow", "オレンジ");
+    case HighlightColor::Green:  return QCoreApplication::translate("MainWindow", "グリーン");
+    case HighlightColor::Purple: return QCoreApplication::translate("MainWindow", "パープル");
     }
     return {};
 }
@@ -286,11 +286,11 @@ QString themeKeyForIndex(int theme)
 QString themeLabelForIndex(int theme)
 {
     switch (theme) {
-    case 0: return QStringLiteral("ライト");
-    case 1: return QStringLiteral("セピア");
-    case 2: return QStringLiteral("ダーク");
+    case 0: return QCoreApplication::translate("MainWindow", "ライト");
+    case 1: return QCoreApplication::translate("MainWindow", "セピア");
+    case 2: return QCoreApplication::translate("MainWindow", "ダーク");
     }
-    return QStringLiteral("ライト");
+    return QCoreApplication::translate("MainWindow", "ライト");
 }
 
 QColor adjustedBrightness(QColor color, int amount)
@@ -387,12 +387,12 @@ QString translationExportFailureMessage(const QString &error, const QString &sou
                                         const QString &diagnosticPath = {})
 {
     QStringList lines;
-    lines << QStringLiteral("翻訳に失敗しました:") << error << QString();
-    lines << QStringLiteral("対象段落: %1/%2").arg(index).arg(total);
-    lines << QStringLiteral("翻訳先: %1 (%2)").arg(target, targetCode);
-    lines << QStringLiteral("モデル: %1").arg(model);
-    lines << QStringLiteral("本文長: %1 文字").arg(source.size());
-    lines << QStringLiteral("本文先頭: %1").arg(compactPreview(source));
+    lines << QCoreApplication::translate("MainWindow", "翻訳に失敗しました:") << error << QString();
+    lines << QCoreApplication::translate("MainWindow", "対象段落: %1/%2").arg(index).arg(total);
+    lines << QCoreApplication::translate("MainWindow", "翻訳先: %1 (%2)").arg(target, targetCode);
+    lines << QCoreApplication::translate("MainWindow", "モデル: %1").arg(model);
+    lines << QCoreApplication::translate("MainWindow", "本文長: %1 文字").arg(source.size());
+    lines << QCoreApplication::translate("MainWindow", "本文先頭: %1").arg(compactPreview(source));
     if (!diagnosticPath.isEmpty())
         lines << QString() << diagnosticPath;
     return lines.join(QLatin1Char('\n'));
@@ -581,22 +581,22 @@ void MainWindow::openEpubSmart(const QString &filePath)
 
 void MainWindow::showAboutDialog()
 {
-    QMessageBox::about(this, QStringLiteral("Spindle について"),
-                       QStringLiteral("<h3>Spindle</h3><p>バージョン %1</p>")
+    QMessageBox::about(this, tr("Spindle について"),
+                       tr("<h3>Spindle</h3><p>バージョン %1</p>")
                            .arg(QCoreApplication::applicationVersion()));
 }
 
 void MainWindow::openAppearanceDialog()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("表示の明るさ"));
+    dialog.setWindowTitle(tr("表示の明るさ"));
     QFormLayout *form = new QFormLayout(&dialog);
 
     QComboBox *themeBox = new QComboBox(&dialog);
     for (int i = 0; i < 3; ++i)
         themeBox->addItem(themeLabelForIndex(i), i);
     themeBox->setCurrentIndex(static_cast<int>(m_theme));
-    form->addRow(QStringLiteral("テーマ"), themeBox);
+    form->addRow(tr("テーマ"), themeBox);
 
     auto makeSlider = [&dialog](QSlider **sliderOut, QLabel **labelOut) {
         QWidget *row = new QWidget(&dialog);
@@ -623,9 +623,9 @@ void MainWindow::openAppearanceDialog()
     QLabel *backgroundLabel = nullptr;
     QLabel *originalLabel = nullptr;
     QLabel *translationLabel = nullptr;
-    form->addRow(QStringLiteral("背景"), makeSlider(&backgroundSlider, &backgroundLabel));
-    form->addRow(QStringLiteral("原文"), makeSlider(&originalSlider, &originalLabel));
-    form->addRow(QStringLiteral("翻訳文"), makeSlider(&translationSlider, &translationLabel));
+    form->addRow(tr("背景"), makeSlider(&backgroundSlider, &backgroundLabel));
+    form->addRow(tr("原文"), makeSlider(&originalSlider, &originalLabel));
+    form->addRow(tr("翻訳文"), makeSlider(&translationSlider, &translationLabel));
 
     auto updateLabels = [=] {
         backgroundLabel->setText(QString::number(backgroundSlider->value()));
@@ -697,24 +697,24 @@ void MainWindow::openAppearanceDialog()
 void MainWindow::openWrapSettingsDialog()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("折り返し設定"));
+    dialog.setWindowTitle(tr("折り返し設定"));
     QFormLayout *form = new QFormLayout(&dialog);
 
     QComboBox *modeBox = new QComboBox(&dialog);
-    modeBox->addItem(QStringLiteral("ウインドウの幅"),
+    modeBox->addItem(tr("ウインドウの幅"),
                      static_cast<int>(WrapMode::WindowWidth));
-    modeBox->addItem(QStringLiteral("指定した文字数"),
+    modeBox->addItem(tr("指定した文字数"),
                      static_cast<int>(WrapMode::CharacterCount));
     modeBox->setCurrentIndex(modeBox->findData(static_cast<int>(m_wrapMode)));
-    form->addRow(QStringLiteral("折り返し幅"), modeBox);
+    form->addRow(tr("折り返し幅"), modeBox);
 
     QSpinBox *characters = new QSpinBox(&dialog);
     characters->setRange(10, 120);
-    characters->setSuffix(QStringLiteral(" 文字"));
+    characters->setSuffix(tr(" 文字"));
     characters->setValue(m_wrapCharacters);
     characters->setEnabled(m_wrapMode == WrapMode::CharacterCount);
-    characters->setToolTip(QStringLiteral("全角文字を基準にした1行の最大文字数"));
-    form->addRow(QStringLiteral("1行の文字数"), characters);
+    characters->setToolTip(tr("全角文字を基準にした1行の最大文字数"));
+    form->addRow(tr("1行の文字数"), characters);
     connect(modeBox, QOverload<int>::of(&QComboBox::currentIndexChanged), characters,
             [=](int) {
                 characters->setEnabled(modeBox->currentData().toInt()
@@ -741,41 +741,41 @@ void MainWindow::buildUi()
 {
     menuBar()->setNativeMenuBar(true);
 
-    QAction *openAction = new QAction(QStringLiteral("EPUB を開く…"), this);
+    QAction *openAction = new QAction(tr("EPUB を開く…"), this);
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenTriggered);
-    QMenu *fileMenu = menuBar()->addMenu(QStringLiteral("ファイル"));
+    QMenu *fileMenu = menuBar()->addMenu(tr("ファイル"));
     fileMenu->addAction(openAction);
-    fileMenu->addAction(QStringLiteral("最近開いた EPUB を表示"), this,
+    fileMenu->addAction(tr("最近開いた EPUB を表示"), this,
                         &MainWindow::showRecentEpubsPane);
-    m_recentEpubsMenu = fileMenu->addMenu(QStringLiteral("最近開いた EPUB"));
+    m_recentEpubsMenu = fileMenu->addMenu(tr("最近開いた EPUB"));
     connect(m_recentEpubsMenu, &QMenu::aboutToShow, this, &MainWindow::updateRecentEpubsMenu);
     updateRecentEpubsMenu();
     fileMenu->addSeparator();
-    QAction *quitAction = fileMenu->addAction(QStringLiteral("終了"));
+    QAction *quitAction = fileMenu->addAction(tr("終了"));
     quitAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
     quitAction->setMenuRole(QAction::QuitRole); // macOS: shown in the app menu
     // closeAllWindows (not quit()) so every window runs closeEvent — geometry,
     // pending caches and the last-read chapter are persisted on the way out.
     connect(quitAction, &QAction::triggered, this, [] { QApplication::closeAllWindows(); });
 
-    QMenu *hlMenu = menuBar()->addMenu(QStringLiteral("ハイライト"));
-    hlMenu->addAction(QStringLiteral("Kindle ノートを読み込み…"), this,
+    QMenu *hlMenu = menuBar()->addMenu(tr("ハイライト"));
+    hlMenu->addAction(tr("Kindle ノートを読み込み…"), this,
                       &MainWindow::importKindleNotebook);
     hlMenu->addSeparator();
-    hlMenu->addAction(QStringLiteral("Markdown で書き出し…"), this,
+    hlMenu->addAction(tr("Markdown で書き出し…"), this,
                       &MainWindow::exportHighlightsMarkdown);
-    hlMenu->addAction(QStringLiteral("JSON で書き出し…"), this, &MainWindow::exportHighlightsJson);
+    hlMenu->addAction(tr("JSON で書き出し…"), this, &MainWindow::exportHighlightsJson);
     hlMenu->addSeparator();
-    hlMenu->addAction(QStringLiteral("読み込み (Markdown / JSON)…"), this,
+    hlMenu->addAction(tr("読み込み (Markdown / JSON)…"), this,
                       &MainWindow::importHighlights);
 
-    QMenu *chapterMenu = menuBar()->addMenu(QStringLiteral("章"));
-    chapterMenu->addAction(QStringLiteral("青空文庫 XHTML で書き出し…"), this,
+    QMenu *chapterMenu = menuBar()->addMenu(tr("章"));
+    chapterMenu->addAction(tr("青空文庫 XHTML で書き出し…"), this,
                            &MainWindow::exportChapterAozora);
 
-    QMenu *viewMenu = menuBar()->addMenu(QStringLiteral("表示"));
-    QMenu *themeMenu = viewMenu->addMenu(QStringLiteral("テーマ"));
+    QMenu *viewMenu = menuBar()->addMenu(tr("表示"));
+    QMenu *themeMenu = viewMenu->addMenu(tr("テーマ"));
     QActionGroup *themeGroup = new QActionGroup(this);
     themeGroup->setExclusive(true);
     for (int i = 0; i < 3; ++i) {
@@ -785,31 +785,55 @@ void MainWindow::buildUi()
         connect(act, &QAction::triggered, this, [this, i] { setTheme(i); });
         m_themeActs[i] = act;
     }
-    viewMenu->addAction(QStringLiteral("明るさ調整…"), this, &MainWindow::openAppearanceDialog);
+    viewMenu->addAction(tr("明るさ調整…"), this, &MainWindow::openAppearanceDialog);
+    // UI language: applied at startup (main.cpp installs the matching
+    // translator), so switching here only persists the choice.
+    QMenu *langMenu = viewMenu->addMenu(tr("言語 / Language"));
+    QActionGroup *langGroup = new QActionGroup(this);
+    langGroup->setExclusive(true);
+    const struct {
+        const char *key;
+        QString label;
+    } uiLanguages[] = {{"auto", tr("自動 (システムに従う)")},
+                       {"ja", QStringLiteral("日本語")},
+                       {"en", QStringLiteral("English")}};
+    const QString savedLang =
+        QSettings().value(QStringLiteral("view/language"), QStringLiteral("auto")).toString();
+    for (const auto &lang : uiLanguages) {
+        QAction *action = langMenu->addAction(lang.label);
+        action->setCheckable(true);
+        action->setChecked(savedLang == QLatin1String(lang.key));
+        langGroup->addAction(action);
+        const QString key = QString::fromLatin1(lang.key);
+        connect(action, &QAction::triggered, this, [this, key] {
+            QSettings().setValue(QStringLiteral("view/language"), key);
+            statusBar()->showMessage(tr("言語設定は再起動後に反映されます"), 5000);
+        });
+    }
     viewMenu->addSeparator();
-    viewMenu->addAction(QStringLiteral("折り返し設定…"), this,
+    viewMenu->addAction(tr("折り返し設定…"), this,
                         &MainWindow::openWrapSettingsDialog);
-    m_spreadAction = viewMenu->addAction(QStringLiteral("固定レイアウトを見開き表示"));
+    m_spreadAction = viewMenu->addAction(tr("固定レイアウトを見開き表示"));
     m_spreadAction->setCheckable(true);
     m_spreadAction->setChecked(
         QSettings().value(QStringLiteral("view/fixedSpread"), true).toBool());
     m_spreadAction->setEnabled(false);
     m_spreadAction->setToolTip(
-        QStringLiteral("固定レイアウトEPUBの隣り合う2ページを並べて表示"));
+        tr("固定レイアウトEPUBの隣り合う2ページを並べて表示"));
     connect(m_spreadAction, &QAction::toggled, this, [this](bool on) {
         QSettings().setValue(QStringLiteral("view/fixedSpread"), on);
         updateFixedSpread();
         updateLocation();
         updateNavButtons();
     });
-    m_bindingMenu = viewMenu->addMenu(QStringLiteral("固定レイアウトの綴じ方向"));
+    m_bindingMenu = viewMenu->addMenu(tr("固定レイアウトの綴じ方向"));
     m_bindingMenu->setEnabled(false);
     auto *bindingGroup = new QActionGroup(this);
     bindingGroup->setExclusive(true);
     const QStringList bindingLabels{
-        QStringLiteral("自動（EPUB指定／縦書きは右綴じ）"),
-        QStringLiteral("右綴じ"),
-        QStringLiteral("左綴じ"),
+        tr("自動（EPUB指定／縦書きは右綴じ）"),
+        tr("右綴じ"),
+        tr("左綴じ"),
     };
     for (int i = 0; i < bindingLabels.size(); ++i) {
         QAction *action = m_bindingMenu->addAction(bindingLabels.at(i));
@@ -822,44 +846,44 @@ void MainWindow::buildUi()
         });
     }
     m_bindingModeActs[static_cast<int>(BindingMode::Auto)]->setChecked(true);
-    viewMenu->addAction(QStringLiteral("フォント…"), this, &MainWindow::chooseFont);
-    m_fontOverride = viewMenu->addAction(QStringLiteral("フォントを本文に適用"));
+    viewMenu->addAction(tr("フォント…"), this, &MainWindow::chooseFont);
+    m_fontOverride = viewMenu->addAction(tr("フォントを本文に適用"));
     m_fontOverride->setCheckable(true);
     m_fontOverride->setToolTip(
-        QStringLiteral("選択したフォントを本文に適用（オフで本のフォントに戻す）"));
+        tr("選択したフォントを本文に適用（オフで本のフォントに戻す）"));
     connect(m_fontOverride, &QAction::toggled, this, [this] { applyFontChoice(); });
 
-    QMenu *trMenu = menuBar()->addMenu(QStringLiteral("翻訳"));
-    trMenu->addAction(QStringLiteral("設定…"), this, &MainWindow::openTranslateDialog);
+    QMenu *trMenu = menuBar()->addMenu(tr("翻訳"));
+    trMenu->addAction(tr("設定…"), this, &MainWindow::openTranslateDialog);
     trMenu->addSeparator();
-    trMenu->addAction(QStringLiteral("用語集を生成…"), this, &MainWindow::generateGlossary);
+    trMenu->addAction(tr("用語集を生成…"), this, &MainWindow::generateGlossary);
     trMenu->addSeparator();
-    trMenu->addAction(QStringLiteral("対訳 EPUB を書き出し…"), this,
+    trMenu->addAction(tr("対訳 EPUB を書き出し…"), this,
                       [this] { exportTranslatedEpub(0); });
-    trMenu->addAction(QStringLiteral("訳文 EPUB を書き出し…"), this,
+    trMenu->addAction(tr("訳文 EPUB を書き出し…"), this,
                       [this] { exportTranslatedEpub(1); });
 
-    QMenu *summaryMenu = menuBar()->addMenu(QStringLiteral("要約"));
-    summaryMenu->addAction(QStringLiteral("現在の章を要約"), this,
+    QMenu *summaryMenu = menuBar()->addMenu(tr("要約"));
+    summaryMenu->addAction(tr("現在の章を要約"), this,
                            &MainWindow::summarizeCurrentChapter);
-    summaryMenu->addAction(QStringLiteral("現在の章を再要約"), this,
+    summaryMenu->addAction(tr("現在の章を再要約"), this,
                            &MainWindow::regenerateCurrentChapterSummary);
-    summaryMenu->addAction(QStringLiteral("保存済みの章要約を開く"), this,
+    summaryMenu->addAction(tr("保存済みの章要約を開く"), this,
                            &MainWindow::openSavedCurrentChapterSummary);
-    summaryMenu->addAction(QStringLiteral("設定…"), this,
+    summaryMenu->addAction(tr("設定…"), this,
                            &MainWindow::openSummarySettingsDialog);
     summaryMenu->addSeparator();
-    QMenu *summaryDetailMenu = summaryMenu->addMenu(QStringLiteral("粒度"));
+    QMenu *summaryDetailMenu = summaryMenu->addMenu(tr("粒度"));
     QActionGroup *summaryDetailGroup = new QActionGroup(this);
     summaryDetailGroup->setExclusive(true);
     const struct {
         SummaryDetail detail;
         const char *label;
-    } summaryDetails[] = {{SummaryDetail::Brief, "短め"},
-                          {SummaryDetail::Standard, "標準"},
-                          {SummaryDetail::Detailed, "詳しく"}};
+    } summaryDetails[] = {{SummaryDetail::Brief, QT_TRANSLATE_NOOP("MainWindow", "短め")},
+                          {SummaryDetail::Standard, QT_TRANSLATE_NOOP("MainWindow", "標準")},
+                          {SummaryDetail::Detailed, QT_TRANSLATE_NOOP("MainWindow", "詳しく")}};
     for (const auto &item : summaryDetails) {
-        QAction *action = summaryDetailMenu->addAction(QString::fromUtf8(item.label));
+        QAction *action = summaryDetailMenu->addAction(tr(item.label));
         action->setCheckable(true);
         action->setChecked(m_summaryDetail == item.detail);
         summaryDetailGroup->addAction(action);
@@ -867,29 +891,29 @@ void MainWindow::buildUi()
                 [this, item] { setSummaryDetail(static_cast<int>(item.detail)); });
     }
 
-    QMenu *speechMenu = menuBar()->addMenu(QStringLiteral("読み上げ"));
-    m_speakToggleAct = speechMenu->addAction(QStringLiteral("▶ 読み上げ"), this,
+    QMenu *speechMenu = menuBar()->addMenu(tr("読み上げ"));
+    m_speakToggleAct = speechMenu->addAction(tr("▶ 読み上げ"), this,
                                              &MainWindow::toggleSpeech);
     m_speakToggleAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
-    m_speakToggleAct->setToolTip(QStringLiteral("現在の章を読み上げ / 一時停止"));
-    m_speakStopAct = speechMenu->addAction(QStringLiteral("■ 停止"), this,
+    m_speakToggleAct->setToolTip(tr("現在の章を読み上げ / 一時停止"));
+    m_speakStopAct = speechMenu->addAction(tr("■ 停止"), this,
                                            &MainWindow::stopSpeech);
-    m_speakStopAct->setToolTip(QStringLiteral("読み上げを停止"));
+    m_speakStopAct->setToolTip(tr("読み上げを停止"));
     m_speakStopAct->setEnabled(false);
     speechMenu->addSeparator();
-    m_speakAutoAdvanceAct = speechMenu->addAction(QStringLiteral("章末で次の章へ進む"));
+    m_speakAutoAdvanceAct = speechMenu->addAction(tr("章末で次の章へ進む"));
     m_speakAutoAdvanceAct->setCheckable(true);
     m_speakAutoAdvanceAct->setChecked(
         QSettings().value(QStringLiteral("tts/autoAdvance"), true).toBool());
     connect(m_speakAutoAdvanceAct, &QAction::toggled, this,
             [](bool on) { QSettings().setValue(QStringLiteral("tts/autoAdvance"), on); });
-    speechMenu->addAction(QStringLiteral("音声設定…"), this, &MainWindow::openTtsDialog);
+    speechMenu->addAction(tr("音声設定…"), this, &MainWindow::openTtsDialog);
     speechMenu->addSeparator();
-    speechMenu->addAction(QStringLiteral("章を音声ファイルへ書き出し…"), this,
+    speechMenu->addAction(tr("章を音声ファイルへ書き出し…"), this,
                           &MainWindow::exportChapterAudio);
 
-    QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("ヘルプ"));
-    helpMenu->addAction(QStringLiteral("Spindle について"), this, &MainWindow::showAboutDialog);
+    QMenu *helpMenu = menuBar()->addMenu(tr("ヘルプ"));
+    helpMenu->addAction(tr("Spindle について"), this, &MainWindow::showAboutDialog);
 
     QToolBar *toolbar = addToolBar(QStringLiteral("Main"));
     toolbar->setMovable(false);
@@ -908,18 +932,18 @@ void MainWindow::buildUi()
     };
 
     QAction *openToolbarAction = toolbar->addAction(
-        themeIcon("document-open-symbolic", QStyle::SP_DialogOpenButton), QStringLiteral("開く"));
-    openToolbarAction->setToolTip(QStringLiteral("EPUB を開く"));
+        themeIcon("document-open-symbolic", QStyle::SP_DialogOpenButton), tr("開く"));
+    openToolbarAction->setToolTip(tr("EPUB を開く"));
     connect(openToolbarAction, &QAction::triggered, this, &MainWindow::onOpenTriggered);
     iconOnly(openToolbarAction);
     toolbar->addSeparator();
 
     m_sidebarAction = toolbar->addAction(
         themeIcon("sidebar-show-symbolic", QStyle::SP_FileDialogListView),
-        QStringLiteral("サイドバー"));
+        tr("サイドバー"));
     m_sidebarAction->setCheckable(true);
     m_sidebarAction->setChecked(true);
-    m_sidebarAction->setToolTip(QStringLiteral("左ペインの表示/非表示"));
+    m_sidebarAction->setToolTip(tr("左ペインの表示/非表示"));
     connect(m_sidebarAction, &QAction::toggled, this,
             [this](bool on) {
                 if (m_sidebar)
@@ -928,17 +952,17 @@ void MainWindow::buildUi()
     iconOnly(m_sidebarAction);
     QAction *recentToolbarAction = toolbar->addAction(
         themeIcon("document-open-recent-symbolic", QStyle::SP_FileDialogContentsView),
-        QStringLiteral("履歴"));
-    recentToolbarAction->setToolTip(QStringLiteral("最近開いた EPUB を左ペインに表示"));
+        tr("履歴"));
+    recentToolbarAction->setToolTip(tr("最近開いた EPUB を左ペインに表示"));
     connect(recentToolbarAction, &QAction::triggered, this, &MainWindow::showRecentEpubsPane);
     iconOnly(recentToolbarAction);
     toolbar->addSeparator();
     m_prevAction = toolbar->addAction(themeIcon("go-previous-symbolic", QStyle::SP_ArrowBack),
-                                      QStringLiteral("前の章"));
-    m_prevAction->setToolTip(QStringLiteral("前の章"));
+                                      tr("前の章"));
+    m_prevAction->setToolTip(tr("前の章"));
     m_nextAction = toolbar->addAction(themeIcon("go-next-symbolic", QStyle::SP_ArrowForward),
-                                      QStringLiteral("次の章"));
-    m_nextAction->setToolTip(QStringLiteral("次の章"));
+                                      tr("次の章"));
+    m_nextAction->setToolTip(tr("次の章"));
     connect(m_prevAction, &QAction::triggered, this, &MainWindow::previousChapter);
     connect(m_nextAction, &QAction::triggered, this, &MainWindow::nextChapter);
     iconOnly(m_prevAction);
@@ -946,13 +970,13 @@ void MainWindow::buildUi()
     toolbar->addSeparator();
     QToolButton *aiButton = new QToolButton(toolbar);
     aiButton->setText(QStringLiteral("AI"));
-    aiButton->setToolTip(QStringLiteral("翻訳と要約"));
+    aiButton->setToolTip(tr("翻訳と要約"));
     aiButton->setPopupMode(QToolButton::InstantPopup);
     QMenu *aiMenu = new QMenu(aiButton);
-    aiMenu->addAction(QStringLiteral("翻訳設定…"), this, &MainWindow::openTranslateDialog);
-    aiMenu->addAction(QStringLiteral("用語集を生成…"), this, &MainWindow::generateGlossary);
-    aiMenu->addAction(QStringLiteral("現在の章を要約"), this, &MainWindow::summarizeCurrentChapter);
-    aiMenu->addAction(QStringLiteral("要約設定…"), this, &MainWindow::openSummarySettingsDialog);
+    aiMenu->addAction(tr("翻訳設定…"), this, &MainWindow::openTranslateDialog);
+    aiMenu->addAction(tr("用語集を生成…"), this, &MainWindow::generateGlossary);
+    aiMenu->addAction(tr("現在の章を要約"), this, &MainWindow::summarizeCurrentChapter);
+    aiMenu->addAction(tr("要約設定…"), this, &MainWindow::openSummarySettingsDialog);
     aiButton->setMenu(aiMenu);
     toolbar->addWidget(aiButton);
     toolbar->addSeparator();
@@ -962,8 +986,8 @@ void MainWindow::buildUi()
     // current chapter via the same setTranslateView path.
     QActionGroup *viewModeGroup = new QActionGroup(this);
     viewModeGroup->setExclusive(true);
-    const QString viewModeLabels[3] = {QStringLiteral("原文"), QStringLiteral("対訳"),
-                                       QStringLiteral("訳文")};
+    const QString viewModeLabels[3] = {tr("原文"), tr("対訳"),
+                                       tr("訳文")};
     for (int i = 0; i < 3; ++i) {
         QAction *act = toolbar->addAction(viewModeLabels[i]);
         act->setCheckable(true);
@@ -978,10 +1002,10 @@ void MainWindow::buildUi()
     toolbar->addSeparator();
     QAction *fontMinus = toolbar->addAction(QStringLiteral("A−"), this,
                                             &MainWindow::decreaseFont);
-    fontMinus->setToolTip(QStringLiteral("文字を小さく"));
+    fontMinus->setToolTip(tr("文字を小さく"));
     QAction *fontPlus = toolbar->addAction(QStringLiteral("A+"), this,
                                            &MainWindow::increaseFont);
-    fontPlus->setToolTip(QStringLiteral("文字を大きく"));
+    fontPlus->setToolTip(tr("文字を大きく"));
     // No QStyle fallback exists for zoom, so keep the A−/A+ text where the
     // icon theme has no zoom glyphs (e.g. stock Windows/macOS).
     const QIcon zoomOut = QIcon::fromTheme(QStringLiteral("zoom-out-symbolic"),
@@ -996,7 +1020,7 @@ void MainWindow::buildUi()
     }
     QAction *xmlAction = toolbar->addAction(QStringLiteral("XML"));
     xmlAction->setCheckable(true);
-    xmlAction->setToolTip(QStringLiteral("章の XHTML ソースを表示"));
+    xmlAction->setToolTip(tr("章の XHTML ソースを表示"));
     connect(xmlAction, &QAction::toggled, this, &MainWindow::toggleXmlView);
 
     m_location = new QLabel(QStringLiteral("No book loaded"), this);
@@ -1009,16 +1033,16 @@ void MainWindow::buildUi()
     sideLayout->setContentsMargins(10, 10, 10, 10);
     sideLayout->setSpacing(8);
 
-    m_titleLabel = new QLabel(QStringLiteral("EPUB を開いてください"), sidebar);
+    m_titleLabel = new QLabel(tr("EPUB を開いてください"), sidebar);
     m_titleLabel->setWordWrap(true);
     QFont titleFont = m_titleLabel->font();
     titleFont.setBold(true);
     m_titleLabel->setFont(titleFont);
-    m_authorLabel = new QLabel(QStringLiteral("ローカルファイルを選択して読み始めます"), sidebar);
+    m_authorLabel = new QLabel(tr("ローカルファイルを選択して読み始めます"), sidebar);
     m_authorLabel->setWordWrap(true);
 
     m_searchInput = new QLineEdit(sidebar);
-    m_searchInput->setPlaceholderText(QStringLiteral("本文を検索..."));
+    m_searchInput->setPlaceholderText(tr("本文を検索..."));
     m_searchInput->setClearButtonEnabled(true);
     connect(m_searchInput, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
     connect(m_searchInput, &QLineEdit::returnPressed, this, [this] {
@@ -1038,9 +1062,9 @@ void MainWindow::buildUi()
     QHBoxLayout *tabsLayout = new QHBoxLayout(tabs);
     tabsLayout->setContentsMargins(0, 0, 0, 0);
     tabsLayout->setSpacing(6);
-    m_tabToc = new QPushButton(QStringLiteral("目次"), tabs);
-    m_tabHighlights = new QPushButton(QStringLiteral("ハイライト"), tabs);
-    m_tabRecent = new QPushButton(QStringLiteral("履歴"), tabs);
+    m_tabToc = new QPushButton(tr("目次"), tabs);
+    m_tabHighlights = new QPushButton(tr("ハイライト"), tabs);
+    m_tabRecent = new QPushButton(tr("履歴"), tabs);
     m_tabToc->setCheckable(true);
     m_tabHighlights->setCheckable(true);
     m_tabRecent->setCheckable(true);
@@ -1067,7 +1091,7 @@ void MainWindow::buildUi()
                 if (!item)
                     return;
                 QMenu menu;
-                QAction *del = menu.addAction(QStringLiteral("削除"));
+                QAction *del = menu.addAction(tr("削除"));
                 if (menu.exec(m_highlightsList->mapToGlobal(pos)) == del)
                     removeHighlightById(item->data(Qt::UserRole).toString());
             });
@@ -1156,7 +1180,7 @@ void MainWindow::ensureWebView()
         connect(QWebEngineProfile::defaultProfile(), &QWebEngineProfile::downloadRequested,
                 QWebEngineProfile::defaultProfile(), [](QWebEngineDownloadRequest *download) {
                     const QString path = QFileDialog::getSaveFileName(
-                        nullptr, QStringLiteral("保存"), download->suggestedFileName());
+                        nullptr, tr("保存"), download->suggestedFileName());
                     if (path.isEmpty()) {
                         download->cancel();
                         return;
@@ -1274,8 +1298,8 @@ void MainWindow::handleImageContextMenu(const QPoint &globalPos, const QUrl &med
         return;
 
     QMenu menu(this);
-    QAction *copyAct = menu.addAction(QStringLiteral("画像をコピー"));
-    QAction *saveAct = menu.addAction(QStringLiteral("名前を付けて画像を保存..."));
+    QAction *copyAct = menu.addAction(tr("画像をコピー"));
+    QAction *saveAct = menu.addAction(tr("名前を付けて画像を保存..."));
     QAction *chosen = menu.exec(globalPos);
     if (chosen != copyAct && chosen != saveAct)
         return;
@@ -1292,13 +1316,13 @@ void MainWindow::handleImageContextMenu(const QPoint &globalPos, const QUrl &med
     }
 
     const QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("名前を付けて画像を保存"), QFileInfo(zipPath).fileName());
+        this, tr("名前を付けて画像を保存"), QFileInfo(zipPath).fileName());
     if (path.isEmpty())
         return;
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly) || f.write(bytes) < 0 || !f.commit()) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("保存に失敗しました:\n%1").arg(f.errorString()));
+                             tr("保存に失敗しました:\n%1").arg(f.errorString()));
     }
 }
 
@@ -1448,7 +1472,7 @@ void MainWindow::restoreViewSettings()
 void MainWindow::onOpenTriggered()
 {
     const QString path = QFileDialog::getOpenFileName(
-        this, QStringLiteral("EPUB を開く"), QString(), QStringLiteral("EPUB (*.epub)"));
+        this, tr("EPUB を開く"), QString(), QStringLiteral("EPUB (*.epub)"));
     if (!path.isEmpty())
         openEpubSmart(path);
 }
@@ -1500,7 +1524,7 @@ void MainWindow::updateRecentEpubsMenu()
     m_recentEpubsMenu->clear();
     const QStringList paths = recentEpubs();
     if (paths.isEmpty()) {
-        QAction *empty = m_recentEpubsMenu->addAction(QStringLiteral("(履歴なし)"));
+        QAction *empty = m_recentEpubsMenu->addAction(tr("(履歴なし)"));
         empty->setEnabled(false);
         return;
     }
@@ -1523,7 +1547,7 @@ void MainWindow::updateRecentEpubsView()
     m_recentEpubsList->clear();
     const QStringList paths = recentEpubs();
     if (paths.isEmpty()) {
-        QListWidgetItem *empty = new QListWidgetItem(QStringLiteral("履歴なし"), m_recentEpubsList);
+        QListWidgetItem *empty = new QListWidgetItem(tr("履歴なし"), m_recentEpubsList);
         empty->setFlags(empty->flags() & ~Qt::ItemIsEnabled);
         return;
     }
@@ -1534,13 +1558,13 @@ void MainWindow::updateRecentEpubsView()
         const QString folder = info.absolutePath();
         const QString chapter = recentChapterLabel(path);
         const QString detail =
-            chapter.isEmpty() ? folder : QStringLiteral("%1\n最後: %2").arg(folder, chapter);
+            chapter.isEmpty() ? folder : tr("%1\n最後: %2").arg(folder, chapter);
         auto *item = new QListWidgetItem(QStringLiteral("%1\n%2").arg(name, detail),
                                          m_recentEpubsList);
         item->setToolTip(path);
         item->setData(Qt::UserRole, path);
         if (!info.exists()) {
-            item->setText(QStringLiteral("%1\n%2").arg(name, QStringLiteral("見つかりません")));
+            item->setText(QStringLiteral("%1\n%2").arg(name, tr("見つかりません")));
             item->setForeground(Qt::gray);
         }
     }
@@ -1599,7 +1623,7 @@ void MainWindow::openRecentEpub(const QString &filePath)
 {
     if (!QFileInfo::exists(filePath)) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("履歴の EPUB が見つかりません:\n%1").arg(filePath));
+                             tr("履歴の EPUB が見つかりません:\n%1").arg(filePath));
         removeRecentEpub(filePath);
         return;
     }
@@ -1626,7 +1650,7 @@ bool MainWindow::openEpub(const QString &filePath)
     auto book = std::make_unique<EpubBook>();
     if (!book->open(filePath)) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("EPUB を読み込めませんでした:\n%1")
+                             tr("EPUB を読み込めませんでした:\n%1")
                                  .arg(book->errorString()));
         return false;
     }
@@ -1653,7 +1677,7 @@ bool MainWindow::openEpub(const QString &filePath)
     m_trCache.load(m_epubPath, m_trTarget);
     m_trGlossary.load(m_epubPath, m_trTarget);
 
-    m_titleLabel->setText(m_book->title().isEmpty() ? QStringLiteral("(無題)") : m_book->title());
+    m_titleLabel->setText(m_book->title().isEmpty() ? tr("(無題)") : m_book->title());
     m_authorLabel->setText(m_book->author());
     setWindowTitle(m_book->title().isEmpty()
                        ? QStringLiteral("Spindle")
@@ -2342,7 +2366,7 @@ void MainWindow::chooseFont()
     bool ok = false;
     const QFont initial = m_fontChoice.isEmpty() ? font() : QFont(m_fontChoice);
     const QFont picked =
-        QFontDialog::getFont(&ok, initial, this, QStringLiteral("本文フォント"));
+        QFontDialog::getFont(&ok, initial, this, tr("本文フォント"));
     if (!ok)
         return;
     m_fontChoice = picked.family();
@@ -2438,8 +2462,8 @@ void MainWindow::runSearch()
     if (!hits.isEmpty()) {
         const QString countText =
             hits.size() >= 500
-                ? QStringLiteral("検索結果: %1件（上限）").arg(hits.size())
-                : QStringLiteral("検索結果: %1件").arg(hits.size());
+                ? tr("検索結果: %1件（上限）").arg(hits.size())
+                : tr("検索結果: %1件").arg(hits.size());
         auto *summary = new QListWidgetItem(countText, m_searchResults);
         summary->setFlags(Qt::NoItemFlags);
     }
@@ -2460,13 +2484,13 @@ void MainWindow::runSearch()
         item->setData(Qt::UserRole, hit.chapterPath);
         item->setData(Qt::UserRole + 1, hit.start);
         item->setData(Qt::UserRole + 2, hit.end);
-        item->setToolTip(QStringLiteral("%1 — 位置 %2")
+        item->setToolTip(tr("%1 — 位置 %2")
                              .arg(hit.chapterLabel)
                              .arg(hit.start + 1));
     }
 
     if (hits.isEmpty())
-        new QListWidgetItem(QStringLiteral("該当なし"), m_searchResults);
+        new QListWidgetItem(tr("該当なし"), m_searchResults);
     updateSidebarMode();
 }
 
@@ -2544,12 +2568,12 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
         for (HighlightColor c : colors)
             map.insert(menu.addAction(swatchIcon(c), highlightLabel(c)), c);
         menu.addSeparator();
-        withNote = menu.addAction(QStringLiteral("＋ ノート付きで追加…"));
+        withNote = menu.addAction(tr("＋ ノート付きで追加…"));
     }
-    QAction *translateAction = menu.addAction(QStringLiteral("🌐 翻訳"));
-    QAction *summaryAction = menu.addAction(QStringLiteral("要約"));
-    QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
-    QAction *webSearchAction = menu.addAction(QStringLiteral("Web で検索"));
+    QAction *translateAction = menu.addAction(tr("🌐 翻訳"));
+    QAction *summaryAction = menu.addAction(tr("要約"));
+    QAction *copyAction = menu.addAction(tr("コピー"));
+    QAction *webSearchAction = menu.addAction(tr("Web で検索"));
 
     QAction *chosen = menu.exec(QCursor::pos());
     if (!chosen)
@@ -2564,7 +2588,7 @@ void MainWindow::onWebSelection(int block, const QString &side, const QString &l
         summarizeSelection(text);
     } else if (chosen == withNote) {
         bool ok = false;
-        const QString note = promptNoteText(QStringLiteral("ノートを入力:"), QString(), &ok);
+        const QString note = promptNoteText(tr("ノートを入力:"), QString(), &ok);
         if (ok)
             createHighlight(HighlightColor::Yellow, block, hside, effLang, offset, length, text, note);
     } else if (map.contains(chosen)) {
@@ -2660,7 +2684,7 @@ void MainWindow::setHighlightColor(const QString &id, HighlightColor color)
 QString MainWindow::promptNoteText(const QString &label, const QString &initial, bool *ok)
 {
     QDialog dlg(this);
-    dlg.setWindowTitle(QStringLiteral("ノート"));
+    dlg.setWindowTitle(tr("ノート"));
     QVBoxLayout *lay = new QVBoxLayout(&dlg);
     lay->addWidget(new QLabel(label, &dlg));
     QTextEdit *edit = new QTextEdit(&dlg);
@@ -2688,7 +2712,7 @@ void MainWindow::editHighlightNote(const QString &id)
     if (!h)
         return;
     bool ok = false;
-    const QString note = promptNoteText(QStringLiteral("ノートを編集:"), h->note, &ok);
+    const QString note = promptNoteText(tr("ノートを編集:"), h->note, &ok);
     if (!ok)
         return;
     h->note = note.trimmed();
@@ -2703,20 +2727,20 @@ void MainWindow::onMarkClicked(const QString &id)
         return;
 
     QMenu menu;
-    QAction *copyAction = menu.addAction(QStringLiteral("コピー"));
-    QAction *webSearchAction = menu.addAction(QStringLiteral("Web で検索"));
+    QAction *copyAction = menu.addAction(tr("コピー"));
+    QAction *webSearchAction = menu.addAction(tr("Web で検索"));
     menu.addSeparator();
-    QMenu *colorMenu = menu.addMenu(QStringLiteral("色を変更"));
+    QMenu *colorMenu = menu.addMenu(tr("色を変更"));
     const HighlightColor colors[] = {HighlightColor::Yellow, HighlightColor::Blue,
                                      HighlightColor::Pink, HighlightColor::Orange,
                                      HighlightColor::Green, HighlightColor::Purple};
     QHash<QAction *, HighlightColor> map;
     for (HighlightColor c : colors)
         map.insert(colorMenu->addAction(swatchIcon(c), highlightLabel(c)), c);
-    QAction *noteAction = menu.addAction(h->note.isEmpty() ? QStringLiteral("ノートを追加…")
-                                                           : QStringLiteral("ノートを編集…"));
+    QAction *noteAction = menu.addAction(h->note.isEmpty() ? tr("ノートを追加…")
+                                                           : tr("ノートを編集…"));
     menu.addSeparator();
-    QAction *deleteAction = menu.addAction(QStringLiteral("削除"));
+    QAction *deleteAction = menu.addAction(tr("削除"));
 
     QAction *chosen = menu.exec(QCursor::pos());
     if (!chosen)
@@ -2762,8 +2786,8 @@ void MainWindow::renderHighlightsList()
         if (snippet.size() > 80)
             snippet = snippet.left(80) + QStringLiteral("…");
         // Mark which side the highlight was made on (原文 / 訳文).
-        const QString tag = h.side == HighlightSide::Translation ? QStringLiteral("訳")
-                                                                 : QStringLiteral("原");
+        const QString tag = h.side == HighlightSide::Translation ? tr("訳")
+                                                                 : tr("原");
         QString label = QStringLiteral("［%1］%2").arg(tag, snippet);
         if (!h.note.isEmpty())
             label += QStringLiteral("\n📝 ") + h.note.simplified();
@@ -2803,7 +2827,7 @@ void MainWindow::persistHighlights()
                 m_book ? m_book->author() : QString()};
     if (!highlight_store::save(m_epubPath, ref, m_highlights)) {
         statusBar()->showMessage(
-            QStringLiteral("ハイライトの保存に失敗しました: %1")
+            tr("ハイライトの保存に失敗しました: %1")
                 .arg(highlight_store::filePathFor(m_epubPath)), 8000);
     }
 }
@@ -2816,7 +2840,7 @@ void MainWindow::exportHighlightsMarkdown()
         return;
     if (m_highlights.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("書き出すハイライトがありません。"));
+                                 tr("書き出すハイライトがありません。"));
         return;
     }
 
@@ -2831,14 +2855,14 @@ void MainWindow::exportHighlightsMarkdown()
     QString suggested = (m_book->title().isEmpty() ? QStringLiteral("highlights") : m_book->title());
     suggested.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
     const QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("Markdown で書き出し"), suggested + QStringLiteral(".md"),
+        this, tr("Markdown で書き出し"), suggested + QStringLiteral(".md"),
         QStringLiteral("Markdown (*.md)"));
     if (path.isEmpty())
         return;
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly) || f.write(md.toUtf8()) < 0 || !f.commit()) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("書き出しに失敗しました:\n%1").arg(f.errorString()));
+                             tr("書き出しに失敗しました:\n%1").arg(f.errorString()));
     }
 }
 
@@ -2848,7 +2872,7 @@ void MainWindow::exportHighlightsJson()
         return;
     if (m_highlights.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("書き出すハイライトがありません。"));
+                                 tr("書き出すハイライトがありません。"));
         return;
     }
 
@@ -2860,7 +2884,7 @@ void MainWindow::exportHighlightsJson()
     QString suggested = (m_book->title().isEmpty() ? QStringLiteral("highlights") : m_book->title());
     suggested.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
     const QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("JSON で書き出し"), suggested + QStringLiteral(".json"),
+        this, tr("JSON で書き出し"), suggested + QStringLiteral(".json"),
         QStringLiteral("JSON (*.json)"));
     if (path.isEmpty())
         return;
@@ -2868,7 +2892,7 @@ void MainWindow::exportHighlightsJson()
     if (!f.open(QIODevice::WriteOnly) || f.write(highlight_store::serializeFile(file)) < 0
         || !f.commit()) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("書き出しに失敗しました:\n%1").arg(f.errorString()));
+                             tr("書き出しに失敗しました:\n%1").arg(f.errorString()));
     }
 }
 
@@ -2876,28 +2900,28 @@ void MainWindow::exportChapterAozora()
 {
     if (!m_book || m_currentChapter < 0) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("先に章を開いてください。"));
+                                 tr("先に章を開いてください。"));
         return;
     }
     const Chapter &chapter = m_book->chapters().at(m_currentChapter);
     const QString xhtml = aozora::exportChapter(*m_book, chapter);
     if (xhtml.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("章の書き出しに失敗しました。"));
+                             tr("章の書き出しに失敗しました。"));
         return;
     }
 
     QString suggested = chapter.label.isEmpty() ? QStringLiteral("chapter") : chapter.label;
     suggested.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
     const QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("青空文庫 XHTML で書き出し"), suggested + QStringLiteral(".html"),
+        this, tr("青空文庫 XHTML で書き出し"), suggested + QStringLiteral(".html"),
         QStringLiteral("XHTML (*.html *.xhtml)"));
     if (path.isEmpty())
         return;
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly) || f.write(xhtml.toUtf8()) < 0 || !f.commit()) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("書き出しに失敗しました:\n%1").arg(f.errorString()));
+                             tr("書き出しに失敗しました:\n%1").arg(f.errorString()));
     }
 }
 
@@ -2905,12 +2929,12 @@ void MainWindow::exportTranslatedEpub(int mode)
 {
     if (!m_book || m_epubPath.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("先に EPUB を開いてください。"));
+                                 tr("先に EPUB を開いてください。"));
         return;
     }
     if (m_exportActive) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("翻訳エクスポートを実行中です。"));
+                                 tr("翻訳エクスポートを実行中です。"));
         return;
     }
     m_exportMode = mode;
@@ -2945,10 +2969,10 @@ void MainWindow::startTranslatedEpubExport(const QStringList &missing)
     // Signal-driven progress dialog (no nested event loop, no processEvents):
     // requests run kTranslateConcurrency at a time; cancel keeps what finished.
     m_exportDialog = new QDialog(this);
-    m_exportDialog->setWindowTitle(QStringLiteral("翻訳エクスポート"));
+    m_exportDialog->setWindowTitle(tr("翻訳エクスポート"));
     m_exportDialog->setWindowModality(Qt::WindowModal);
     QVBoxLayout *layout = new QVBoxLayout(m_exportDialog);
-    QLabel *label = new QLabel(QStringLiteral("未翻訳の段落を翻訳しています（%1 へ: %2）…")
+    QLabel *label = new QLabel(tr("未翻訳の段落を翻訳しています（%1 へ: %2）…")
                                    .arg(targetLanguageName(m_trTarget), m_trModel),
                                m_exportDialog);
     label->setWordWrap(true);
@@ -2956,7 +2980,7 @@ void MainWindow::startTranslatedEpubExport(const QStringList &missing)
     m_exportBar->setRange(0, m_exportQueue.size());
     m_exportBar->setValue(0);
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, m_exportDialog);
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(tr("キャンセル"));
     connect(buttons, &QDialogButtonBox::rejected, m_exportDialog, &QDialog::reject);
     connect(m_exportDialog, &QDialog::rejected, this, &MainWindow::cancelTranslatedEpubExport);
     layout->addWidget(label);
@@ -3015,10 +3039,10 @@ void MainWindow::onExportTranslateFinished(int requestId, bool ok, const QString
                 m_trEndpoint, m_trModel, targetName, m_trTarget, targetPrompt, glossary, text,
                 failedIndex, total, result)) {
             diagnosticMessage =
-                QStringLiteral("送信した全文を保存しました:\n%1").arg(diagnosticPath);
+                tr("送信した全文を保存しました:\n%1").arg(diagnosticPath);
         } else if (!diagnosticError.isEmpty()) {
             diagnosticMessage =
-                QStringLiteral("診断ファイルを保存できませんでした: %1").arg(diagnosticError);
+                tr("診断ファイルを保存できませんでした: %1").arg(diagnosticError);
         }
         QMessageBox::warning(this, QStringLiteral("Spindle"),
                              translationExportFailureMessage(result, text, failedIndex, total,
@@ -3071,12 +3095,12 @@ void MainWindow::finishTranslatedEpubExport()
         return;
     const auto emode = m_exportMode == 1 ? translated_epub::Mode::Translation
                                          : translated_epub::Mode::Bilingual;
-    const QString label = m_exportMode == 1 ? QStringLiteral("訳文") : QStringLiteral("対訳");
+    const QString label = m_exportMode == 1 ? tr("訳文") : tr("対訳");
 
     QString suggested = m_book->title().isEmpty() ? QStringLiteral("book") : m_book->title();
     suggested.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
     const QString outPath = QFileDialog::getSaveFileName(
-        this, QStringLiteral("%1 EPUB を書き出し").arg(label),
+        this, tr("%1 EPUB を書き出し").arg(label),
         QStringLiteral("%1_%2.epub").arg(suggested, label), QStringLiteral("EPUB (*.epub)"));
     if (outPath.isEmpty())
         return;
@@ -3084,10 +3108,10 @@ void MainWindow::finishTranslatedEpubExport()
     QString err;
     if (translated_epub::write(*m_book, m_epubPath, outPath, emode, m_trCache, &err)) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("%1 EPUB を書き出しました。").arg(label));
+                                 tr("%1 EPUB を書き出しました。").arg(label));
     } else {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("書き出しに失敗しました:\n%1").arg(err));
+                             tr("書き出しに失敗しました:\n%1").arg(err));
     }
 }
 
@@ -3152,15 +3176,15 @@ void MainWindow::syncTranslateViewUi()
     const bool enabled = m_book && !sameLang;
     const int current = sameLang ? 0 : static_cast<int>(m_translateView);
     const QString tips[3] = {
-        QStringLiteral("原文のみ表示"),
-        QStringLiteral("原文と訳文を対訳表示（Ollama で翻訳）"),
-        QStringLiteral("訳文のみ表示（Ollama で翻訳）"),
+        tr("原文のみ表示"),
+        tr("原文と訳文を対訳表示（Ollama で翻訳）"),
+        tr("訳文のみ表示（Ollama で翻訳）"),
     };
     for (int i = 0; i < 3; ++i) {
         m_viewModeActs[i]->setEnabled(enabled);
         m_viewModeActs[i]->setChecked(i == current);
         m_viewModeActs[i]->setToolTip(
-            sameLang ? QStringLiteral("本の言語と翻訳先が同じため、原文表示のみです")
+            sameLang ? tr("本の言語と翻訳先が同じため、原文表示のみです")
                      : tips[i]);
     }
 }
@@ -3208,7 +3232,7 @@ void MainWindow::translateNext(int run)
         m_trReqs.insert(reqId, {run, item.first, item.second});
         ++m_trInFlight;
         if (m_bridge)
-            m_bridge->applyTranslation(item.first, QStringLiteral("翻訳中…"),
+            m_bridge->applyTranslation(item.first, tr("翻訳中…"),
                                        QStringLiteral("pending"));
         m_ollama->translate(m_trEndpoint, m_trModel, targetLanguageNameAndLabel(m_trTarget), item.second,
                             m_trGlossary.promptBlockForText(item.second), reqId, m_trTarget);
@@ -3235,7 +3259,7 @@ void MainWindow::onOllamaFinished(int requestId, bool ok, const QString &result)
     } else {
         if (m_bridge)
             m_bridge->applyTranslation(req.index,
-                                       QStringLiteral("⚠ 翻訳に失敗しました: ") + result,
+                                       tr("⚠ 翻訳に失敗しました: ") + result,
                                        QStringLiteral("error"));
         // A failure before any success usually means Ollama is unreachable —
         // stop dispatching rather than spamming every paragraph with the error.
@@ -3252,7 +3276,7 @@ void MainWindow::translateSelection(const QString &text)
     const QString src = text.trimmed();
     if (src.isEmpty())
         return;
-    showTranslatePopup(QStringLiteral("翻訳中…"));
+    showTranslatePopup(tr("翻訳中…"));
     m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageNameAndLabel(m_trTarget), src,
                                  m_trGlossary.promptBlockForText(src), ++m_selectionReqSeq,
                                  m_trTarget);
@@ -3264,7 +3288,7 @@ void MainWindow::onSelectionTranslated(int requestId, bool ok, const QString &re
         return; // reply from an earlier selection — a newer one is in flight
     if (!m_translatePopup || !m_translatePopup->isVisible())
         return;
-    showTranslatePopup(ok ? result : QStringLiteral("⚠ 翻訳に失敗しました: ") + result);
+    showTranslatePopup(ok ? result : tr("⚠ 翻訳に失敗しました: ") + result);
 }
 
 void MainWindow::summarizeSelection(const QString &text)
@@ -3276,8 +3300,8 @@ void MainWindow::summarizeSelection(const QString &text)
     m_summaryChapterPath.clear();
     m_summaryChapterTitle.clear();
     m_summaryTruncated = false;
-    showSummaryDialog(QStringLiteral("選択範囲の要約 (%1)").arg(summaryDetailLabel()),
-                      QStringLiteral("要約中…"));
+    showSummaryDialog(tr("選択範囲の要約 (%1)").arg(summaryDetailLabel()),
+                      tr("要約中…"));
     m_summaryReqIsTranslate = false;
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), src, summaryDetailInstruction(),
@@ -3298,7 +3322,7 @@ void MainWindow::generateCurrentChapterSummary(bool force)
 {
     if (!m_book || m_currentChapter < 0) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("EPUB を開いてから要約してください。"));
+                                 tr("EPUB を開いてから要約してください。"));
         return;
     }
 
@@ -3312,10 +3336,10 @@ void MainWindow::generateCurrentChapterSummary(bool force)
             m_summaryChapterTitle = chapter.label;
             m_summarySaveable = true;
             m_summaryTruncated = false;
-            showSummaryDialog(QStringLiteral("保存済みの章要約 (%1)").arg(summaryDetailLabel()),
+            showSummaryDialog(tr("保存済みの章要約 (%1)").arg(summaryDetailLabel()),
                               saved.summaryMarkdown);
             if (m_summarySaveButton)
-                m_summarySaveButton->setText(QStringLiteral("保存済み"));
+                m_summarySaveButton->setText(tr("保存済み"));
             return;
         }
     }
@@ -3331,7 +3355,7 @@ void MainWindow::generateCurrentChapterSummary(bool force)
     }
     if (text.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("この章には要約できる本文がありません。"));
+                                 tr("この章には要約できる本文がありません。"));
         return;
     }
 
@@ -3343,10 +3367,10 @@ void MainWindow::generateCurrentChapterSummary(bool force)
     if (m_summaryTruncated)
         text = text.left(kMaxSummaryInputChars);
 
-    showSummaryDialog(QStringLiteral("章の要約 (%1)").arg(summaryDetailLabel()),
+    showSummaryDialog(tr("章の要約 (%1)").arg(summaryDetailLabel()),
                       m_summaryTruncated
-                          ? QStringLiteral("要約中…（章が長いため先頭部分を要約します）")
-                          : QStringLiteral("要約中…"));
+                          ? tr("要約中…（章が長いため先頭部分を要約します）")
+                          : tr("要約中…"));
     m_summaryReqIsTranslate = false;
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), text, summaryDetailInstruction(),
@@ -3357,7 +3381,7 @@ void MainWindow::openSavedCurrentChapterSummary()
 {
     if (!m_book || m_currentChapter < 0) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("EPUB を開いてから保存済み要約を選択してください。"));
+                                 tr("EPUB を開いてから保存済み要約を選択してください。"));
         return;
     }
 
@@ -3368,7 +3392,7 @@ void MainWindow::openSavedCurrentChapterSummary()
     if (summary.summaryMarkdown.isEmpty()) {
         QMessageBox::information(
             this, QStringLiteral("Spindle"),
-            QStringLiteral("現在の章には、%1 / %2 の保存済み要約がありません。")
+            tr("現在の章には、%1 / %2 の保存済み要約がありません。")
                 .arg(targetLanguageName(m_trTarget), summaryDetailLabel()));
         return;
     }
@@ -3377,10 +3401,10 @@ void MainWindow::openSavedCurrentChapterSummary()
     m_summaryChapterTitle = chapter.label;
     m_summarySaveable = true;
     m_summaryTruncated = false;
-    showSummaryDialog(QStringLiteral("保存済みの章要約 (%1)").arg(summaryDetailLabel()),
+    showSummaryDialog(tr("保存済みの章要約 (%1)").arg(summaryDetailLabel()),
                       summary.summaryMarkdown);
     if (m_summarySaveButton)
-        m_summarySaveButton->setText(QStringLiteral("保存済み"));
+        m_summarySaveButton->setText(tr("保存済み"));
 }
 
 void MainWindow::setSummaryDetail(int detail)
@@ -3393,11 +3417,11 @@ void MainWindow::setSummaryDetail(int detail)
 QString MainWindow::summaryDetailLabel() const
 {
     switch (m_summaryDetail) {
-    case SummaryDetail::Brief: return QStringLiteral("短め");
-    case SummaryDetail::Standard: return QStringLiteral("標準");
-    case SummaryDetail::Detailed: return QStringLiteral("詳しく");
+    case SummaryDetail::Brief: return tr("短め");
+    case SummaryDetail::Standard: return tr("標準");
+    case SummaryDetail::Detailed: return tr("詳しく");
     }
-    return QStringLiteral("標準");
+    return tr("標準");
 }
 
 QString MainWindow::summaryDetailKey() const
@@ -3457,7 +3481,7 @@ void MainWindow::saveCurrentChapterSummary()
     summary_store::save(m_epubPath, summaries);
 
     if (m_summarySaveButton)
-        m_summarySaveButton->setText(QStringLiteral("保存済み"));
+        m_summarySaveButton->setText(tr("保存済み"));
 }
 
 void MainWindow::translateCurrentSummary()
@@ -3467,10 +3491,10 @@ void MainWindow::translateCurrentSummary()
         return;
 
     m_summaryPreTranslateTitle =
-        m_summaryDialog ? m_summaryDialog->windowTitle() : QStringLiteral("要約");
+        m_summaryDialog ? m_summaryDialog->windowTitle() : tr("要約");
     m_summarySaveable = false;
-    showSummaryDialog(QStringLiteral("要約を翻訳中 (%1)").arg(targetLanguageName(m_trTarget)),
-                      QStringLiteral("翻訳中…"));
+    showSummaryDialog(tr("要約を翻訳中 (%1)").arg(targetLanguageName(m_trTarget)),
+                      tr("翻訳中…"));
     m_summaryReqIsTranslate = true;
     m_summaryOllama->translate(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), src,
@@ -3486,21 +3510,21 @@ void MainWindow::onSummaryFinished(int requestId, bool ok, const QString &result
     if (!ok) {
         showSummaryDialog(m_summaryDialog->windowTitle(),
                           m_summaryReqIsTranslate
-                              ? QStringLiteral("⚠ 翻訳に失敗しました: ") + result
-                              : QStringLiteral("⚠ 要約に失敗しました: ") + result);
+                              ? tr("⚠ 翻訳に失敗しました: ") + result
+                              : tr("⚠ 要約に失敗しました: ") + result);
         return;
     }
     if (m_summaryReqIsTranslate) {
         m_summarySaveable = !m_summaryChapterPath.isEmpty();
         const QString title = m_summaryPreTranslateTitle.isEmpty()
-                                  ? QStringLiteral("要約")
+                                  ? tr("要約")
                                   : m_summaryPreTranslateTitle;
         showSummaryDialog(title, result);
         return;
     }
 
     const QString prefix =
-        m_summaryTruncated ? QStringLiteral("※ 長いため先頭部分から要約しました。\n\n") : QString();
+        m_summaryTruncated ? tr("※ 長いため先頭部分から要約しました。\n\n") : QString();
     m_summarySaveable = !m_summaryChapterPath.isEmpty();
     showSummaryDialog(m_summaryDialog->windowTitle(), prefix + result);
 }
@@ -3525,15 +3549,15 @@ void MainWindow::showSummaryDialog(const QString &title, const QString &text)
         layout->addWidget(m_summaryText);
 
         QDialogButtonBox *buttons = new QDialogButtonBox(m_summaryDialog);
-        QPushButton *copyButton = buttons->addButton(QStringLiteral("コピー"),
+        QPushButton *copyButton = buttons->addButton(tr("コピー"),
                                                      QDialogButtonBox::ActionRole);
-        m_summarySaveButton = buttons->addButton(QStringLiteral("保存"),
+        m_summarySaveButton = buttons->addButton(tr("保存"),
                                                  QDialogButtonBox::ActionRole);
         m_summarySaveButton->setEnabled(false);
-        m_summaryTranslateButton = buttons->addButton(QStringLiteral("翻訳"),
+        m_summaryTranslateButton = buttons->addButton(tr("翻訳"),
                                                       QDialogButtonBox::ActionRole);
         m_summaryTranslateButton->setEnabled(false);
-        m_summaryRegenerateButton = buttons->addButton(QStringLiteral("再作成"),
+        m_summaryRegenerateButton = buttons->addButton(tr("再作成"),
                                                        QDialogButtonBox::ActionRole);
         m_summaryRegenerateButton->setEnabled(false);
         buttons->addButton(QDialogButtonBox::Close);
@@ -3561,7 +3585,7 @@ void MainWindow::showSummaryDialog(const QString &title, const QString &text)
     m_summaryDialog->setWindowTitle(title);
     m_summaryMarkdown = text;
     if (m_summarySaveButton) {
-        m_summarySaveButton->setText(QStringLiteral("保存"));
+        m_summarySaveButton->setText(tr("保存"));
         m_summarySaveButton->setEnabled(m_summarySaveable && !m_summaryMarkdown.trimmed().isEmpty());
     }
     if (m_summaryRegenerateButton)
@@ -3569,8 +3593,8 @@ void MainWindow::showSummaryDialog(const QString &title, const QString &text)
     if (m_summaryTranslateButton)
         m_summaryTranslateButton->setEnabled(!m_summaryMarkdown.trimmed().isEmpty()
                                              && !m_summaryMarkdown.contains(
-                                                 QStringLiteral("要約中"))
-                                             && m_summaryMarkdown != QStringLiteral("翻訳中…")
+                                                 tr("要約中"))
+                                             && m_summaryMarkdown != tr("翻訳中…")
                                              && !m_summaryMarkdown.startsWith(
                                                  QStringLiteral("⚠")));
     if (m_summaryText) {
@@ -3678,18 +3702,18 @@ void MainWindow::generateGlossary()
 {
     if (!m_book || m_epubPath.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("先に EPUB を開いてください。"));
+                                 tr("先に EPUB を開いてください。"));
         return;
     }
     if (m_glossaryActive) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("用語集の生成を実行中です。"));
+                                 tr("用語集の生成を実行中です。"));
         return;
     }
     if (isBookLanguage(m_trTarget)) {
         QMessageBox::information(
             this, QStringLiteral("Spindle"),
-            QStringLiteral("この本は既に翻訳先言語（%1）で書かれているため、翻訳用の"
+            tr("この本は既に翻訳先言語（%1）で書かれているため、翻訳用の"
                            "用語集は生成できません。翻訳 > 設定… で翻訳先言語を変更して"
                            "ください。")
                 .arg(targetLanguageName(m_trTarget)));
@@ -3703,7 +3727,7 @@ void MainWindow::generateGlossary()
     if (!existing.isEmpty() && !fileTarget.isEmpty() && fileTarget != m_trTarget) {
         const auto answer = QMessageBox::question(
             this, QStringLiteral("Spindle"),
-            QStringLiteral("既存の用語集は %1 向けです。%2 向けに作り直しますか？\n"
+            tr("既存の用語集は %1 向けです。%2 向けに作り直しますか？\n"
                            "（既存の内容は置き換えられます）")
                 .arg(targetLanguageName(fileTarget), targetLanguageName(m_trTarget)));
         if (answer != QMessageBox::Yes)
@@ -3712,17 +3736,17 @@ void MainWindow::generateGlossary()
     }
 
     QMessageBox scopeBox(this);
-    scopeBox.setWindowTitle(QStringLiteral("用語集を生成 (Ollama)"));
-    scopeBox.setText(QStringLiteral("本文から固有名詞や繰り返し使われる用語を抽出し、"
+    scopeBox.setWindowTitle(tr("用語集を生成 (Ollama)"));
+    scopeBox.setText(tr("本文から固有名詞や繰り返し使われる用語を抽出し、"
                                     "%1 への訳語を %2 に追記します。\n"
                                     "どの範囲から生成しますか？")
                          .arg(targetLanguageName(m_trTarget),
                               QFileInfo(Glossary::filePathFor(m_epubPath)).fileName()));
     QPushButton *chapterButton =
         m_currentChapter >= 0
-            ? scopeBox.addButton(QStringLiteral("現在の章"), QMessageBox::AcceptRole)
+            ? scopeBox.addButton(tr("現在の章"), QMessageBox::AcceptRole)
             : nullptr;
-    QPushButton *bookButton = scopeBox.addButton(QStringLiteral("本全体"),
+    QPushButton *bookButton = scopeBox.addButton(tr("本全体"),
                                                  QMessageBox::AcceptRole);
     scopeBox.addButton(QMessageBox::Cancel);
     scopeBox.exec();
@@ -3746,7 +3770,7 @@ void MainWindow::generateGlossary()
     }
     if (chunks.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("抽出できる本文がありません。"));
+                                 tr("抽出できる本文がありません。"));
         return;
     }
 
@@ -3775,10 +3799,10 @@ void MainWindow::generateGlossary()
     // (falls back to the translation model) is used — translation-tuned
     // models can't produce the JSON term list.
     m_glossaryDialog = new QDialog(this);
-    m_glossaryDialog->setWindowTitle(QStringLiteral("用語集を生成"));
+    m_glossaryDialog->setWindowTitle(tr("用語集を生成"));
     m_glossaryDialog->setWindowModality(Qt::WindowModal);
     QVBoxLayout *layout = new QVBoxLayout(m_glossaryDialog);
-    QLabel *label = new QLabel(QStringLiteral("用語を抽出しています（%1 へ: %2）…")
+    QLabel *label = new QLabel(tr("用語を抽出しています（%1 へ: %2）…")
                                    .arg(targetLanguageName(m_trTarget), effectiveSummaryModel()),
                                m_glossaryDialog);
     label->setWordWrap(true);
@@ -3786,7 +3810,7 @@ void MainWindow::generateGlossary()
     m_glossaryBar->setRange(0, m_glossaryQueue.size());
     m_glossaryBar->setValue(0);
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, m_glossaryDialog);
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(tr("キャンセル"));
     connect(buttons, &QDialogButtonBox::rejected, m_glossaryDialog, &QDialog::reject);
     connect(m_glossaryDialog, &QDialog::rejected, this, &MainWindow::cancelGlossaryGenerate);
     layout->addWidget(label);
@@ -3910,16 +3934,16 @@ void MainWindow::finishGlossaryGenerate(const QString &error)
 
     QStringList lines;
     if (!error.isEmpty())
-        lines << QStringLiteral("用語の抽出に失敗しました: %1").arg(error);
+        lines << tr("用語の抽出に失敗しました: %1").arg(error);
     if (saved) {
-        lines << QStringLiteral("用語集に %1 件を追加しました（合計 %2 件）。")
+        lines << tr("用語集に %1 件を追加しました（合計 %2 件）。")
                      .arg(added)
                      .arg(total);
         lines << Glossary::filePathFor(m_epubPath);
     } else if (added > 0) {
-        lines << QStringLiteral("用語集を保存できませんでした: %1").arg(saveError);
+        lines << tr("用語集を保存できませんでした: %1").arg(saveError);
     } else if (error.isEmpty()) {
-        lines << QStringLiteral("新しい用語は見つかりませんでした。");
+        lines << tr("新しい用語は見つかりませんでした。");
     }
     if (error.isEmpty() && (saved || added == 0))
         QMessageBox::information(this, QStringLiteral("Spindle"), lines.join(QLatin1Char('\n')));
@@ -3930,21 +3954,21 @@ void MainWindow::finishGlossaryGenerate(const QString &error)
 void MainWindow::openSummarySettingsDialog()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("要約設定 (Ollama)"));
+    dialog.setWindowTitle(tr("要約設定 (Ollama)"));
     QFormLayout *form = new QFormLayout(&dialog);
 
     QLineEdit *modelEdit = new QLineEdit(m_summaryModel, &dialog);
     modelEdit->setPlaceholderText(m_trModel);
-    form->addRow(QStringLiteral("要約モデル"), modelEdit);
+    form->addRow(tr("要約モデル"), modelEdit);
 
-    QLabel *hint = new QLabel(QStringLiteral("未入力の場合は翻訳モデルを使用します。"), &dialog);
+    QLabel *hint = new QLabel(tr("未入力の場合は翻訳モデルを使用します。"), &dialog);
     hint->setWordWrap(true);
     form->addRow(hint);
 
     QDialogButtonBox *buttons =
         new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
-    buttons->button(QDialogButtonBox::Save)->setText(QStringLiteral("保存"));
-    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("閉じる"));
+    buttons->button(QDialogButtonBox::Save)->setText(tr("保存"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(tr("閉じる"));
     form->addRow(buttons);
 
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -3967,11 +3991,11 @@ void MainWindow::openSummarySettingsDialog()
 void MainWindow::openTranslateDialog()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("対訳翻訳 (Ollama)"));
+    dialog.setWindowTitle(tr("対訳翻訳 (Ollama)"));
     QFormLayout *form = new QFormLayout(&dialog);
 
     QComboBox *modeBox = new QComboBox(&dialog);
-    modeBox->addItems({QStringLiteral("原文"), QStringLiteral("対訳併記"), QStringLiteral("訳文")});
+    modeBox->addItems({tr("原文"), tr("対訳併記"), tr("訳文")});
     modeBox->setCurrentIndex(static_cast<int>(m_translateView));
 
     QComboBox *targetBox = new QComboBox(&dialog);
@@ -3987,33 +4011,33 @@ void MainWindow::openTranslateDialog()
     QLineEdit *endpointEdit = new QLineEdit(m_trEndpoint, &dialog);
 
     QComboBox *colorBox = new QComboBox(&dialog);
-    colorBox->addItem(QStringLiteral("なし（原文と同じ）"), QString());
-    colorBox->addItem(QStringLiteral("藍 / 青"), QStringLiteral("blue"));
-    colorBox->addItem(QStringLiteral("ティール"), QStringLiteral("teal"));
-    colorBox->addItem(QStringLiteral("グレー"), QStringLiteral("gray"));
-    colorBox->addItem(QStringLiteral("緑"), QStringLiteral("green"));
+    colorBox->addItem(tr("なし（原文と同じ）"), QString());
+    colorBox->addItem(tr("藍 / 青"), QStringLiteral("blue"));
+    colorBox->addItem(tr("ティール"), QStringLiteral("teal"));
+    colorBox->addItem(tr("グレー"), QStringLiteral("gray"));
+    colorBox->addItem(tr("緑"), QStringLiteral("green"));
     const int customIdx = colorBox->count();
-    colorBox->addItem(QStringLiteral("カスタム…"), QStringLiteral("custom"));
+    colorBox->addItem(tr("カスタム…"), QStringLiteral("custom"));
     if (m_trColor.startsWith(QLatin1Char('#'))) {
-        colorBox->setItemText(customIdx, QStringLiteral("カスタム (%1)").arg(m_trColor));
+        colorBox->setItemText(customIdx, tr("カスタム (%1)").arg(m_trColor));
         colorBox->setCurrentIndex(customIdx);
     } else {
         const int i = colorBox->findData(m_trColor);
         colorBox->setCurrentIndex(i >= 0 ? i : 0);
     }
 
-    form->addRow(QStringLiteral("表示モード"), modeBox);
-    form->addRow(QStringLiteral("翻訳先"), targetBox);
-    form->addRow(QStringLiteral("翻訳モデル"), modelEdit);
-    form->addRow(QStringLiteral("エンドポイント"), endpointEdit);
-    form->addRow(QStringLiteral("訳文の色"), colorBox);
+    form->addRow(tr("表示モード"), modeBox);
+    form->addRow(tr("翻訳先"), targetBox);
+    form->addRow(tr("翻訳モデル"), modelEdit);
+    form->addRow(tr("エンドポイント"), endpointEdit);
+    form->addRow(tr("訳文の色"), colorBox);
 
     QDialogButtonBox *buttons = new QDialogButtonBox(&dialog);
-    QPushButton *retranslate = buttons->addButton(QStringLiteral("再翻訳"),
+    QPushButton *retranslate = buttons->addButton(tr("再翻訳"),
                                                   QDialogButtonBox::AcceptRole);
-    buttons->addButton(QStringLiteral("閉じる"), QDialogButtonBox::RejectRole);
+    buttons->addButton(tr("閉じる"), QDialogButtonBox::RejectRole);
     form->addRow(buttons);
-    QLabel *hint = new QLabel(QStringLiteral("ローカルの Ollama が起動している必要があります。"),
+    QLabel *hint = new QLabel(tr("ローカルの Ollama が起動している必要があります。"),
                               &dialog);
     hint->setWordWrap(true);
     form->addRow(hint);
@@ -4034,11 +4058,11 @@ void MainWindow::openTranslateDialog()
                                             ? QColor(m_trColor)
                                             : QColor(QStringLiteral("#3a5f8a"));
                     const QColor c =
-                        QColorDialog::getColor(init, this, QStringLiteral("訳文の色"));
+                        QColorDialog::getColor(init, this, tr("訳文の色"));
                     if (!c.isValid())
                         return; // cancelled — keep the current color
                     m_trColor = c.name();
-                    colorBox->setItemText(customIdx, QStringLiteral("カスタム (%1)").arg(m_trColor));
+                    colorBox->setItemText(customIdx, tr("カスタム (%1)").arg(m_trColor));
                 } else {
                     m_trColor = key;
                 }
@@ -4053,7 +4077,7 @@ void MainWindow::openTranslateDialog()
         modeBox->setEnabled(!same);
         QSignalBlocker block(modeBox);
         modeBox->setCurrentIndex(same ? 0 : static_cast<int>(m_translateView));
-        modeBox->setToolTip(same ? QStringLiteral("本の言語と翻訳先が同じため、原文表示のみです")
+        modeBox->setToolTip(same ? tr("本の言語と翻訳先が同じため、原文表示のみです")
                                  : QString());
     };
     updateModeForLang();
@@ -4096,11 +4120,11 @@ void MainWindow::importKindleNotebook()
 {
     if (!m_book) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("先に EPUB を開いてください。"));
+                                 tr("先に EPUB を開いてください。"));
         return;
     }
     const QString path = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Kindle ノートを読み込み"), QString(),
+        this, tr("Kindle ノートを読み込み"), QString(),
         QStringLiteral("Kindle Notebook (*.html *.htm)"));
     if (path.isEmpty())
         return;
@@ -4108,7 +4132,7 @@ void MainWindow::importKindleNotebook()
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("ファイルを開けませんでした。"));
+                             tr("ファイルを開けませんでした。"));
         return;
     }
     const kindle::KindleNotebook notebook =
@@ -4125,8 +4149,8 @@ void MainWindow::importKindleNotebook()
     bool replace = false;
     if (existingKindle > 0) {
         const QMessageBox::StandardButton btn = QMessageBox::question(
-            this, QStringLiteral("Kindle ハイライト"),
-            QStringLiteral("既に %1 件の Kindle 由来ハイライトがあります。\n\n"
+            this, tr("Kindle ハイライト"),
+            tr("既に %1 件の Kindle 由来ハイライトがあります。\n\n"
                            "「Yes」: 既存の Kindle ハイライトを削除して今回の %2 件で置き換え\n"
                            "「No」: 既存を残し、重複しない新規分のみ追加")
                 .arg(existingKindle)
@@ -4188,33 +4212,33 @@ void MainWindow::importKindleNotebook()
 
     QMessageBox::information(
         this, QStringLiteral("Spindle"),
-        QStringLiteral("Kindle ノート読み込み完了\nエントリ: %1 / マッチ: %2 (失敗 %3)\n"
+        tr("Kindle ノート読み込み完了\nエントリ: %1 / マッチ: %2 (失敗 %3)\n"
                        "新規追加: %4 / 重複スキップ: %5%6")
             .arg(notebook.entries.size())
             .arg(outcome.matches.size())
             .arg(outcome.failures.size())
             .arg(added)
             .arg(skipped)
-            .arg(replace ? QStringLiteral("\n(既存の Kindle ハイライトを置き換えました)") : QString()));
+            .arg(replace ? tr("\n(既存の Kindle ハイライトを置き換えました)") : QString()));
 }
 
 void MainWindow::importHighlights()
 {
     if (!m_book) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("先に EPUB を開いてください。"));
+                                 tr("先に EPUB を開いてください。"));
         return;
     }
     const QString path = QFileDialog::getOpenFileName(
-        this, QStringLiteral("ハイライトを読み込み"), QString(),
-        QStringLiteral("ハイライト (*.md *.markdown *.json)"));
+        this, tr("ハイライトを読み込み"), QString(),
+        tr("ハイライト (*.md *.markdown *.json)"));
     if (path.isEmpty())
         return;
 
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly)) {
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("ファイルを開けませんでした。"));
+                             tr("ファイルを開けませんでした。"));
         return;
     }
     const QByteArray bytes = f.readAll();
@@ -4225,7 +4249,7 @@ void MainWindow::importHighlights()
         imported = highlight_store::parseFile(bytes, &ok).highlights;
         if (!ok && imported.isEmpty()) {
             QMessageBox::warning(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("対応していない JSON 形式です。"));
+                                 tr("対応していない JSON 形式です。"));
             return;
         }
     } else {
@@ -4234,7 +4258,7 @@ void MainWindow::importHighlights()
 
     if (imported.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("読み込めるハイライトがありませんでした。"));
+                                 tr("読み込めるハイライトがありませんでした。"));
         return;
     }
 
@@ -4244,7 +4268,7 @@ void MainWindow::importHighlights()
 
     QMessageBox::information(
         this, QStringLiteral("Spindle"),
-        QStringLiteral("%1 件のハイライトを読み込みました。").arg(imported.size()));
+        tr("%1 件のハイライトを読み込みました。").arg(imported.size()));
 }
 
 // --- sidebar mode ----------------------------------------------------------
@@ -4491,12 +4515,12 @@ void MainWindow::ensureTts()
             // After nextChapter: displayChapter's stopSpeech() would clear it.
             m_ttsPendingPlay = true; // picked up in onLoadFinished
         } else {
-            statusBar()->showMessage(QStringLiteral("読み上げを終了しました"), 3000);
+            statusBar()->showMessage(tr("読み上げを終了しました"), 3000);
         }
     });
     connect(m_ttsCtl, &TtsController::errorOccurred, this, [this](const QString &message) {
         clearSpeechMark();
-        statusBar()->showMessage(QStringLiteral("読み上げエラー: ") + message, 5000);
+        statusBar()->showMessage(tr("読み上げエラー: ") + message, 5000);
     });
 
     // Audio-file export listens on the engine directly (no playback involved).
@@ -4513,7 +4537,7 @@ void MainWindow::toggleSpeech()
         return;
     ensureTts();
     if (!m_ttsCtl) {
-        statusBar()->showMessage(QStringLiteral("音声合成エンジンが利用できません"), 5000);
+        statusBar()->showMessage(tr("音声合成エンジンが利用できません"), 5000);
         return;
     }
     switch (m_ttsCtl->state()) {
@@ -4559,7 +4583,7 @@ void MainWindow::startSpeech()
             const int count = o.value(QStringLiteral("count")).toInt();
             if (count <= 0) {
                 self->statusBar()->showMessage(
-                    QStringLiteral("読み上げできる本文がありません"), 3000);
+                    tr("読み上げできる本文がありません"), 3000);
                 return;
             }
             self->m_ttsCtl->play(count, o.value(QStringLiteral("start")).toInt(), mode);
@@ -4573,13 +4597,13 @@ void MainWindow::updateSpeechActions()
     if (m_speakToggleAct) {
         switch (state) {
         case TtsController::State::Speaking:
-            m_speakToggleAct->setText(QStringLiteral("⏸ 一時停止"));
+            m_speakToggleAct->setText(tr("⏸ 一時停止"));
             break;
         case TtsController::State::Paused:
-            m_speakToggleAct->setText(QStringLiteral("▶ 再開"));
+            m_speakToggleAct->setText(tr("▶ 再開"));
             break;
         case TtsController::State::Idle:
-            m_speakToggleAct->setText(QStringLiteral("▶ 読み上げ"));
+            m_speakToggleAct->setText(tr("▶ 読み上げ"));
             break;
         }
     }
@@ -4625,14 +4649,14 @@ void MainWindow::exportChapterAudio()
 {
     if (!m_book || m_currentChapter < 0) {
         QMessageBox::information(this, QStringLiteral("Spindle"),
-                                 QStringLiteral("先に EPUB を開いてください。"));
+                                 tr("先に EPUB を開いてください。"));
         return;
     }
     if (m_xmlView || m_ttsExportActive)
         return;
     ensureTts();
     if (!m_tts || !m_ttsCtl) {
-        statusBar()->showMessage(QStringLiteral("音声合成エンジンが利用できません"), 5000);
+        statusBar()->showMessage(tr("音声合成エンジンが利用できません"), 5000);
         return;
     }
     stopSpeech();
@@ -4644,8 +4668,8 @@ void MainWindow::exportChapterAudio()
     name.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
     QString selectedFilter;
     QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("章を音声ファイルへ書き出し"), name + QStringLiteral(".wav"),
-        QStringLiteral("WAV 音声 (*.wav);;MP3 音声 (*.mp3);;M4A 音声 (*.m4a)"),
+        this, tr("章を音声ファイルへ書き出し"), name + QStringLiteral(".wav"),
+        tr("WAV 音声 (*.wav);;MP3 音声 (*.mp3);;M4A 音声 (*.m4a)"),
         &selectedFilter);
     if (path.isEmpty())
         return;
@@ -4661,7 +4685,7 @@ void MainWindow::exportChapterAudio()
     if (ext != QLatin1String("wav") && ffmpegPath().isEmpty()) {
         QMessageBox::warning(
             this, QStringLiteral("Spindle"),
-            QStringLiteral("MP3 / M4A の書き出しには ffmpeg が必要です。\n"
+            tr("MP3 / M4A の書き出しには ffmpeg が必要です。\n"
                            "ffmpeg をインストールして PATH に通すか、"
                            "読み上げ > 音声設定… でパスを指定してください。"));
         return;
@@ -4684,7 +4708,7 @@ void MainWindow::exportChapterAudio()
             const int count = o.value(QStringLiteral("count")).toInt();
             if (count <= 0) {
                 self->statusBar()->showMessage(
-                    QStringLiteral("読み上げできる本文がありません"), 3000);
+                    tr("読み上げできる本文がありません"), 3000);
                 return;
             }
             self->m_ttsExportActive = true;
@@ -4693,10 +4717,10 @@ void MainWindow::exportChapterAudio()
             self->m_ttsExportPcm.clear();
             self->m_ttsExportRate = 0;
             auto *dialog = new QProgressDialog(
-                QStringLiteral("章を音声に変換しています…"), QStringLiteral("キャンセル"), 0,
+                tr("章を音声に変換しています…"), tr("キャンセル"), 0,
                 count, self);
             self->m_ttsExportDialog = dialog;
-            dialog->setWindowTitle(QStringLiteral("音声ファイルへ書き出し"));
+            dialog->setWindowTitle(tr("音声ファイルへ書き出し"));
             dialog->setWindowModality(Qt::WindowModal);
             dialog->setMinimumDuration(0);
             dialog->setAutoClose(false);
@@ -4743,7 +4767,7 @@ void MainWindow::ttsExportNext()
             }
             self->m_tts->setLocale(lang.isEmpty() ? self->bookLocale() : QLocale(lang));
             if (!self->m_tts->canSynthesize()) {
-                self->abortTtsExport(QStringLiteral(
+                self->abortTtsExport(tr(
                     "選択中の音声はファイル書き出しに対応していません。音声設定で別の音声"
                     "（VOICEVOX / Piper など）を選んでください。"));
                 return;
@@ -4774,7 +4798,7 @@ void MainWindow::finishTtsExport()
     if (m_ttsExportPcm.isEmpty() || m_ttsExportRate <= 0) {
         m_ttsExportActive = false;
         closeTtsExportDialog();
-        statusBar()->showMessage(QStringLiteral("書き出せる音声がありませんでした"), 5000);
+        statusBar()->showMessage(tr("書き出せる音声がありませんでした"), 5000);
         return;
     }
     m_ttsExportSeconds = qint64(m_ttsExportPcm.size()) / 2 / m_ttsExportRate;
@@ -4790,7 +4814,7 @@ void MainWindow::finishTtsExport()
         m_ttsExportActive = false;
         closeTtsExportDialog();
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("ファイルを保存できません: %1").arg(m_ttsExportPath));
+                             tr("ファイルを保存できません: %1").arg(m_ttsExportPath));
         return;
     }
     ttsExportDone();
@@ -4800,7 +4824,7 @@ void MainWindow::startTtsEncode(const QByteArray &wav)
 {
     const QString ffmpeg = ffmpegPath();
     if (ffmpeg.isEmpty()) { // pre-checked in exportChapterAudio; belt and braces
-        abortTtsExport(QStringLiteral("ffmpeg が見つかりません"));
+        abortTtsExport(tr("ffmpeg が見つかりません"));
         return;
     }
     m_ttsExportTempWav = QDir::temp().filePath(
@@ -4809,13 +4833,13 @@ void MainWindow::startTtsEncode(const QByteArray &wav)
     QFile temp(m_ttsExportTempWav);
     if (!temp.open(QIODevice::WriteOnly) || temp.write(wav) != wav.size()) {
         m_ttsExportTempWav.clear();
-        abortTtsExport(QStringLiteral("一時ファイルを作成できません"));
+        abortTtsExport(tr("一時ファイルを作成できません"));
         return;
     }
     temp.close();
 
     if (m_ttsExportDialog) {
-        m_ttsExportDialog->setLabelText(QStringLiteral("ffmpeg でエンコードしています…"));
+        m_ttsExportDialog->setLabelText(tr("ffmpeg でエンコードしています…"));
         m_ttsExportDialog->setRange(0, 0); // busy
     }
     const QString ext = QFileInfo(m_ttsExportPath).suffix().toLower();
@@ -4836,7 +4860,7 @@ void MainWindow::startTtsEncode(const QByteArray &wav)
             return;
         m_ttsFfmpeg = nullptr;
         proc->deleteLater();
-        abortTtsExport(QStringLiteral("ffmpeg を起動できません: ") + proc->program());
+        abortTtsExport(tr("ffmpeg を起動できません: ") + proc->program());
     });
     connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this, proc](int exitCode, QProcess::ExitStatus status) {
@@ -4849,7 +4873,7 @@ void MainWindow::startTtsEncode(const QByteArray &wav)
                 if (status != QProcess::NormalExit || exitCode != 0) {
                     const QString err =
                         QString::fromLocal8Bit(proc->readAllStandardError()).trimmed();
-                    abortTtsExport(QStringLiteral("ffmpeg のエンコードに失敗しました")
+                    abortTtsExport(tr("ffmpeg のエンコードに失敗しました")
                                    + (err.isEmpty() ? QString()
                                                     : QStringLiteral(":\n") + err.right(300)));
                     return;
@@ -4863,7 +4887,7 @@ void MainWindow::ttsExportDone()
 {
     m_ttsExportActive = false;
     closeTtsExportDialog();
-    statusBar()->showMessage(QStringLiteral("音声ファイルを書き出しました (%1:%2): %3")
+    statusBar()->showMessage(tr("音声ファイルを書き出しました (%1:%2): %3")
                                  .arg(m_ttsExportSeconds / 60)
                                  .arg(m_ttsExportSeconds % 60, 2, 10, QLatin1Char('0'))
                                  .arg(m_ttsExportPath),
@@ -4892,9 +4916,9 @@ void MainWindow::abortTtsExport(const QString &message)
     closeTtsExportDialog();
     if (!message.isEmpty())
         QMessageBox::warning(this, QStringLiteral("Spindle"),
-                             QStringLiteral("音声の書き出しを中止しました:\n") + message);
+                             tr("音声の書き出しを中止しました:\n") + message);
     else
-        statusBar()->showMessage(QStringLiteral("音声の書き出しをキャンセルしました"), 3000);
+        statusBar()->showMessage(tr("音声の書き出しをキャンセルしました"), 3000);
 }
 
 QString MainWindow::ffmpegPath() const
@@ -4922,14 +4946,14 @@ void MainWindow::openTtsDialog()
     if (!m_tts) {
         QMessageBox::information(
             this, QStringLiteral("Spindle"),
-            QStringLiteral("音声合成エンジンが利用できません。\nOS の音声合成 (テキスト読み上げ) "
+            tr("音声合成エンジンが利用できません。\nOS の音声合成 (テキスト読み上げ) "
                            "音声がインストールされているか確認してください。"));
         return;
     }
     stopSpeech(); // voice enumeration switches engine locales — not while speaking
 
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("読み上げ設定"));
+    dialog.setWindowTitle(tr("読み上げ設定"));
     QFormLayout *form = new QFormLayout(&dialog);
 
     QSlider *rateSlider = new QSlider(Qt::Horizontal, &dialog);
@@ -4938,7 +4962,7 @@ void MainWindow::openTtsDialog()
     rateSlider->setTickInterval(5);
     rateSlider->setValue(qRound(m_ttsRate * 10));
     rateSlider->setMinimumWidth(220);
-    form->addRow(QStringLiteral("速度"), rateSlider);
+    form->addRow(tr("速度"), rateSlider);
 
     // One voice picker per distinct language (原文 / 訳文 may coincide).
     // Lists OS voices plus, when reachable/configured, "VOICEVOX: …" and
@@ -4957,14 +4981,14 @@ void MainWindow::openTtsDialog()
                                           .value(QStringLiteral("tts/voice/") + row.lang)
                                           .toString();
         row.box->clear();
-        row.box->addItem(QStringLiteral("既定"), QString());
+        row.box->addItem(tr("既定"), QString());
         const QStringList names = m_tts->voiceNames(row.locale);
         for (const QString &name : names)
             row.box->addItem(name, name);
         const int idx = row.box->findData(current);
         row.box->setCurrentIndex(idx >= 0 ? idx : 0);
         row.box->setToolTip(names.isEmpty()
-                                ? QStringLiteral("この言語の音声が見つかりません")
+                                ? tr("この言語の音声が見つかりません")
                                 : QString());
     };
     auto addVoiceRow = [&](const QString &labelFormat, const QLocale &locale) {
@@ -4978,8 +5002,8 @@ void MainWindow::openTtsDialog()
         form->addRow(labelFormat.arg(locale.nativeLanguageName()), box);
     };
     if (m_book)
-        addVoiceRow(QStringLiteral("原文の音声 (%1)"), bookLocale());
-    addVoiceRow(QStringLiteral("訳文の音声 (%1)"), QLocale(m_trTarget));
+        addVoiceRow(tr("原文の音声 (%1)"), bookLocale());
+    addVoiceRow(tr("訳文の音声 (%1)"), QLocale(m_trTarget));
 
     // Local AI engines. The settings are read by the engines on each use, so
     // they only need to be persisted; 音声一覧を更新 re-queries with the
@@ -4990,7 +5014,7 @@ void MainWindow::openTtsDialog()
                    QStringLiteral("http://localhost:50021"))
             .toString(),
         &dialog);
-    form->addRow(QStringLiteral("VOICEVOX エンドポイント"), voicevoxEdit);
+    form->addRow(tr("VOICEVOX エンドポイント"), voicevoxEdit);
 
     auto pathRow = [&dialog](QLineEdit *edit, QPushButton *browse) {
         QWidget *wrap = new QWidget(&dialog);
@@ -5002,12 +5026,12 @@ void MainWindow::openTtsDialog()
     };
     QLineEdit *piperExeEdit =
         new QLineEdit(settings.value(QStringLiteral("tts/piperExe")).toString(), &dialog);
-    QPushButton *piperExeBrowse = new QPushButton(QStringLiteral("参照…"), &dialog);
+    QPushButton *piperExeBrowse = new QPushButton(tr("参照…"), &dialog);
     connect(piperExeBrowse, &QPushButton::clicked, this, [this, piperExeEdit] {
         const QString path = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Piper 実行ファイル"), piperExeEdit->text(),
+            this, tr("Piper 実行ファイル"), piperExeEdit->text(),
 #ifdef Q_OS_WIN
-            QStringLiteral("実行ファイル (*.exe)")
+            tr("実行ファイル (*.exe)")
 #else
             QString()
 #endif
@@ -5015,28 +5039,28 @@ void MainWindow::openTtsDialog()
         if (!path.isEmpty())
             piperExeEdit->setText(path);
     });
-    form->addRow(QStringLiteral("Piper 実行ファイル"), pathRow(piperExeEdit, piperExeBrowse));
+    form->addRow(tr("Piper 実行ファイル"), pathRow(piperExeEdit, piperExeBrowse));
 
     QLineEdit *piperDirEdit = new QLineEdit(
         settings.value(QStringLiteral("tts/piperVoicesDir")).toString(), &dialog);
-    QPushButton *piperDirBrowse = new QPushButton(QStringLiteral("参照…"), &dialog);
+    QPushButton *piperDirBrowse = new QPushButton(tr("参照…"), &dialog);
     connect(piperDirBrowse, &QPushButton::clicked, this, [this, piperDirEdit] {
         const QString path = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("Piper 音声モデル (.onnx) のフォルダ"), piperDirEdit->text());
+            this, tr("Piper 音声モデル (.onnx) のフォルダ"), piperDirEdit->text());
         if (!path.isEmpty())
             piperDirEdit->setText(path);
     });
-    form->addRow(QStringLiteral("Piper 音声フォルダ"), pathRow(piperDirEdit, piperDirBrowse));
+    form->addRow(tr("Piper 音声フォルダ"), pathRow(piperDirEdit, piperDirBrowse));
 
     QLineEdit *ffmpegEdit = new QLineEdit(
         settings.value(QStringLiteral("tts/ffmpegPath")).toString(), &dialog);
-    ffmpegEdit->setPlaceholderText(QStringLiteral("未指定なら PATH から検索"));
-    QPushButton *ffmpegBrowse = new QPushButton(QStringLiteral("参照…"), &dialog);
+    ffmpegEdit->setPlaceholderText(tr("未指定なら PATH から検索"));
+    QPushButton *ffmpegBrowse = new QPushButton(tr("参照…"), &dialog);
     connect(ffmpegBrowse, &QPushButton::clicked, this, [this, ffmpegEdit] {
         const QString path = QFileDialog::getOpenFileName(
-            this, QStringLiteral("ffmpeg 実行ファイル"), ffmpegEdit->text(),
+            this, tr("ffmpeg 実行ファイル"), ffmpegEdit->text(),
 #ifdef Q_OS_WIN
-            QStringLiteral("実行ファイル (*.exe)")
+            tr("実行ファイル (*.exe)")
 #else
             QString()
 #endif
@@ -5044,7 +5068,7 @@ void MainWindow::openTtsDialog()
         if (!path.isEmpty())
             ffmpegEdit->setText(path);
     });
-    form->addRow(QStringLiteral("ffmpeg（任意）"), pathRow(ffmpegEdit, ffmpegBrowse));
+    form->addRow(tr("ffmpeg（任意）"), pathRow(ffmpegEdit, ffmpegBrowse));
 
     auto persistEnginePaths = [voicevoxEdit, piperExeEdit, piperDirEdit, ffmpegEdit] {
         QString ep = voicevoxEdit->text().trimmed();
@@ -5058,7 +5082,7 @@ void MainWindow::openTtsDialog()
         settings.setValue(QStringLiteral("tts/piperVoicesDir"), piperDirEdit->text().trimmed());
         settings.setValue(QStringLiteral("tts/ffmpegPath"), ffmpegEdit->text().trimmed());
     };
-    QPushButton *refreshVoices = new QPushButton(QStringLiteral("音声一覧を更新"), &dialog);
+    QPushButton *refreshVoices = new QPushButton(tr("音声一覧を更新"), &dialog);
     connect(refreshVoices, &QPushButton::clicked, this,
             [persistEnginePaths, populateVoices, &rows] {
                 persistEnginePaths(); // engines read these settings when queried
@@ -5068,7 +5092,7 @@ void MainWindow::openTtsDialog()
     form->addRow(QString(), refreshVoices);
 
     QLabel *hint = new QLabel(
-        QStringLiteral("OS の音声に加え、起動中の VOICEVOX と Piper の音声モデルを選択できます"
+        tr("OS の音声に加え、起動中の VOICEVOX と Piper の音声モデルを選択できます"
                        "（VOICEVOX / Piper を設定したら「音声一覧を更新」）。訳文表示では訳文を、"
                        "原文・対訳表示では原文を読み上げます。MP3 / M4A への書き出しには "
                        "ffmpeg を使用します。"),
