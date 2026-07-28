@@ -240,6 +240,16 @@ private:
     void closeGlossaryDialog();
     void finishGlossaryGenerate(const QString &error); // ""=completed normally
 
+    // OCR text extraction: run every image page of the book through an Ollama
+    // vision model (sequential; collapse-checked with one retry inside
+    // OllamaClient) and save the result as a Markdown sidecar
+    // (<book>.ocr.md). Cancel keeps the pages finished so far.
+    void extractTextByOcr();
+    void ocrNext();
+    void onOcrPageFinished(int requestId, bool ok, const QString &result);
+    void cancelOcr();
+    void finishOcr(bool canceled);
+
     // Read-aloud (読み上げ): TTS of the current chapter, block by block,
     // following the translation display mode (原文 / 対訳 / 訳文). Block text
     // is fetched from the page DOM (ruby read as its <rt> reading), and the
@@ -404,6 +414,27 @@ private:
     QVector<Glossary::Entry> m_glossaryFound;    // new entries from this run
     QSet<QString> m_glossaryKeys; // case-folded srcs of existing + found
     QString m_glossarySourceLang;
+
+    // OCR text-extraction state (active while the progress dialog is up).
+    OllamaClient *m_ocrOllama = nullptr;
+    QDialog *m_ocrDialog = nullptr;
+    QProgressBar *m_ocrBar = nullptr;
+    struct OcrPage {
+        QString imagePath; // zip-internal
+        QString label;     // spine/TOC label, may be empty
+        QString text;      // OCR result (or error note when failed)
+        bool failed = false;
+    };
+    QVector<OcrPage> m_ocrPages;
+    int m_ocrCursor = 0;
+    int m_ocrDone = 0;
+    int m_ocrReqSeq = 0;
+    int m_ocrReqPage = -1;  // page index of the in-flight request (-1 = none)
+    int m_ocrConsecutiveFailures = 0;
+    bool m_ocrAnyOk = false;
+    bool m_ocrActive = false;
+    QString m_ocrModel;
+    QString m_ocrRetryModel;
 
     // Read-aloud state (created lazily in ensureTts).
     TtsEngine *m_tts = nullptr;

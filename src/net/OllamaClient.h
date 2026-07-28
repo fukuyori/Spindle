@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 
@@ -31,6 +32,12 @@ public:
     // {"entries":[{"src","dst","note"}]} — the caller parses and validates.
     void extractGlossary(const QString &endpoint, const QString &model,
                          const QString &targetLang, const QString &text, int requestId = 0);
+    // OCR one page image with an Ollama vision model (/api/generate + images).
+    // A reply showing repetition collapse — a vision-model failure mode where
+    // one phrase repeats endlessly — is retried once with `retryModel` (when
+    // given and different), then reported as a failure.
+    void ocrImage(const QString &endpoint, const QString &model, const QString &retryModel,
+                  const QByteArray &imageData, int requestId = 0);
 
 signals:
     void finished(int requestId, bool ok, const QString &result);
@@ -40,6 +47,8 @@ private:
                           const QString &targetLang, const QString &text,
                           const QString &glossary, int requestId, const QString &targetCode,
                           int attempt);
+    void ocrAttempt(const QString &endpoint, const QString &model, const QString &retryModel,
+                    const QByteArray &imageData, int requestId, int attempt);
 
     QNetworkAccessManager *m_nam;
 };

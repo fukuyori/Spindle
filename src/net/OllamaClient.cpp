@@ -4,9 +4,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QHash>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QUrl>
 
@@ -140,6 +142,32 @@ bool clearlyWrongLanguage(const QString &text, const QString &code)
         || code == QLatin1String("de") || code == QLatin1String("es"))
         return latin < letters / 2; // mostly non-Latin -> not translated
     return false; // unknown target: no opinion
+}
+
+// OCR repetition collapse: the vision model latches onto one phrase and
+// repeats it until the token limit. Split on newlines and CJK sentence
+// punctuation and flag when a single segment dominates a long output. An
+// empty reply is also treated as collapsed — a page image always has at
+// least something to say about it.
+bool looksCollapsedOcr(const QString &text)
+{
+    if (text.trimmed().isEmpty())
+        return true;
+    static const QRegularExpression splitter(QStringLiteral("[\n。、]"));
+    const QStringList segments = text.split(splitter);
+    QHash<QString, int> counts;
+    int considered = 0;
+    int top = 0;
+    for (const QString &raw : segments) {
+        const QString s = raw.trimmed();
+        if (s.size() < 6)
+            continue;
+        ++considered;
+        top = qMax(top, ++counts[s]);
+    }
+    if (considered < 12)
+        return false;
+    return top >= 8 && top * 10 > considered * 3;
 }
 
 } // namespace
@@ -353,6 +381,65 @@ void OllamaClient::extractGlossary(const QString &endpoint, const QString &model
         const QString result = extractOllamaContent(
             bytes, QStringLiteral("Ollama が空の用語リストを返しました"), &ok);
         emit finished(requestId, ok, result);
+    });
+}
+
+void OllamaClient::ocrImage(const QString &endpoint, const QString &model,
+                            const QString &retryModel, const QByteArray &imageData,
+                            int requestId)
+{
+    ocrAttempt(endpoint, model, retryModel, imageData, requestId, 1);
+}
+
+void OllamaClient::ocrAttempt(const QString &endpoint, const QString &model,
+                              const QString &retryModel, const QByteArray &imageData,
+                              int requestId, int attempt)
+{
+    QString base = endpoint.trimmed();
+    while (base.endsWith(QLatin1Char('/')))
+        base.chop(1);
+    const QUrl url(base + QStringLiteral("/api/generate"));
+
+    const bool retrying = attempt > 1 && !retryModel.isEmpty() && retryModel != model;
+    QJsonObject body;
+    body[QStringLiteral("model")] = retrying ? retryModel : model;
+    body[QStringLiteral("prompt")] = QStringLiteral("Extract all text from this image.");
+    body[QStringLiteral("stream")] = false;
+    body[QStringLiteral("images")] =
+        QJsonArray{QString::fromLatin1(imageData.toBase64())};
+
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setTransferTimeout(kTransferTimeoutMs);
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, url, requestId, endpoint, model, retryModel, imageData, attempt]() {
+        reply->deleteLater();
+        const QByteArray bytes = reply->readAll();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit finished(requestId, false,
+                          QStringLiteral("Ollama への接続に失敗しました (%1): %2")
+                              .arg(url.toString(), ollamaErrorDetail(bytes, reply)));
+            return;
+        }
+        const QJsonObject root = QJsonDocument::fromJson(bytes).object();
+        const QString apiError = root.value(QStringLiteral("error")).toString().trimmed();
+        if (!apiError.isEmpty()) {
+            emit finished(requestId, false, apiError);
+            return;
+        }
+        const QString result = root.value(QStringLiteral("response")).toString().trimmed();
+        if (looksCollapsedOcr(result)) {
+            if (attempt < 2 && !retryModel.isEmpty() && retryModel != model) {
+                ocrAttempt(endpoint, model, retryModel, imageData, requestId, attempt + 1);
+                return;
+            }
+            emit finished(requestId, false,
+                          QStringLiteral("OCR 出力が崩壊しました（空または同一フレーズの繰り返し）"));
+            return;
+        }
+        emit finished(requestId, true, result);
     });
 }
 

@@ -2,6 +2,7 @@
 
 #include "core/AozoraExport.h"
 #include "core/KindleImport.h"
+#include "core/OcrEpub.h"
 #include "core/TranslatedEpub.h"
 #include "core/Markdown.h"
 #include "core/Matcher.h"
@@ -44,6 +45,7 @@
 #include <QHash>
 #include <QIcon>
 #include <QImage>
+#include <QInputDialog>
 #include <QTextEdit>
 #include <QTextCursor>
 #include <QKeyEvent>
@@ -68,6 +70,7 @@
 #include <QProgressBar>
 #include <QProgressDialog>
 #include <QStandardPaths>
+#include <QUrl>
 #include <QUuid>
 #include <QJsonArray>
 #include <QtConcurrent/QtConcurrent>
@@ -501,6 +504,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_trCacheSave->setInterval(1500);
     connect(m_trCacheSave, &QTimer::timeout, this, [this] { m_trCache.flush(); });
 
+    // TEMP-AUTOTEST (remove): drive one OCR run without dialogs.
+    if (qEnvironmentVariableIsSet("SPINDLE_OCR_AUTOTEST")) {
+        QTimer::singleShot(10000, this, &MainWindow::extractTextByOcr);
+        if (qEnvironmentVariable("SPINDLE_OCR_AUTOTEST") == QLatin1String("cancel"))
+            QTimer::singleShot(50000, this, &MainWindow::cancelOcr);
+    }
+
     m_viewUnfreeze = new QTimer(this);
     m_viewUnfreeze->setSingleShot(true);
     m_viewUnfreeze->setInterval(1500);
@@ -862,6 +872,9 @@ void MainWindow::buildUi()
                       [this] { exportTranslatedEpub(0); });
     trMenu->addAction(tr("訳文 EPUB を書き出し…"), this,
                       [this] { exportTranslatedEpub(1); });
+    trMenu->addSeparator();
+    trMenu->addAction(tr("画像ページからテキスト抽出 (OCR)…"), this,
+                      &MainWindow::extractTextByOcr);
 
     QMenu *summaryMenu = menuBar()->addMenu(tr("要約"));
     summaryMenu->addAction(tr("現在の章を要約"), this,
@@ -977,6 +990,9 @@ void MainWindow::buildUi()
     aiMenu->addAction(tr("用語集を生成…"), this, &MainWindow::generateGlossary);
     aiMenu->addAction(tr("現在の章を要約"), this, &MainWindow::summarizeCurrentChapter);
     aiMenu->addAction(tr("要約設定…"), this, &MainWindow::openSummarySettingsDialog);
+    aiMenu->addSeparator();
+    aiMenu->addAction(tr("画像ページからテキスト抽出 (OCR)…"), this,
+                      &MainWindow::extractTextByOcr);
     aiButton->setMenu(aiMenu);
     toolbar->addWidget(aiButton);
     toolbar->addSeparator();
@@ -3979,6 +3995,374 @@ void MainWindow::finishGlossaryGenerate(const QString &error)
         QMessageBox::information(this, QStringLiteral("Spindle"), lines.join(QLatin1Char('\n')));
     else
         QMessageBox::warning(this, QStringLiteral("Spindle"), lines.join(QLatin1Char('\n')));
+}
+
+// ---- OCR text extraction -------------------------------------------------
+
+// The page image of each spine document: the document itself when the spine
+// entry is an image, otherwise the first raster image the page references —
+// fixed-layout books are one full-page image per spine item.
+static QVector<QPair<QString, QString>> collectOcrImagePages(const EpubBook &book)
+{
+    QVector<QPair<QString, QString>> pages; // (zip-internal path, label)
+    static const QRegularExpression imgRe(
+        QStringLiteral("(?:src|xlink:href|href)\\s*=\\s*\"([^\"]+\\.(?:jpe?g|png|webp))\""),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression imageExt(QStringLiteral("\\.(jpe?g|png|webp)$"),
+                                             QRegularExpression::CaseInsensitiveOption);
+    for (const Chapter &ch : book.chapters()) {
+        QString imgPath;
+        if (imageExt.match(ch.path).hasMatch()) {
+            imgPath = ch.path;
+        } else {
+            const QRegularExpressionMatch m = imgRe.match(book.readText(ch.path));
+            if (m.hasMatch())
+                imgPath = path_util::resolve(path_util::dirname(ch.path), m.captured(1));
+        }
+        if (!imgPath.isEmpty() && book.contains(imgPath))
+            pages.append({imgPath, ch.label});
+    }
+    return pages;
+}
+
+static QString ocrSidecarPathFor(const QString &epubPath)
+{
+    QString base = epubPath; // <book>.ocr.md  (e.g. book.epub -> book.ocr.md)
+    if (base.endsWith(QLatin1String(".epub"), Qt::CaseInsensitive))
+        base.chop(5);
+    return base + QStringLiteral(".ocr.md");
+}
+
+static QString ocrEpubPathFor(const QString &epubPath)
+{
+    QString base = epubPath; // <book>.ocr.epub
+    if (base.endsWith(QLatin1String(".epub"), Qt::CaseInsensitive))
+        base.chop(5);
+    return base + QStringLiteral(".ocr.epub");
+}
+
+// Previous results parsed back from <book>.ocr.md, keyed by the zip-internal
+// image path. Pages marked OCR_FAILED (and empty ones) are omitted, so a
+// resumed run re-processes exactly those.
+static QHash<QString, QString> parseOcrSidecar(const QString &path)
+{
+    QHash<QString, QString> byImage;
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return byImage;
+    const QString all = QString::fromUtf8(f.readAll());
+    static const QRegularExpression sectionRe(
+        QStringLiteral("<!-- image: (.+) -->\\n(<!-- OCR_FAILED -->\\n)?\\n(.*?)"
+                       "(?=\\n---\\n\\n## |$)"),
+        QRegularExpression::DotMatchesEverythingOption);
+    QRegularExpressionMatchIterator it = sectionRe.globalMatch(all);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        const QString text = m.captured(3).trimmed();
+        if (m.captured(2).isEmpty() && !text.isEmpty())
+            byImage.insert(m.captured(1).trimmed(), text);
+    }
+    return byImage;
+}
+
+void MainWindow::extractTextByOcr()
+{
+    if (!m_book || m_epubPath.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 tr("先に EPUB を開いてください。"));
+        return;
+    }
+    if (m_ocrActive) {
+        QMessageBox::information(this, QStringLiteral("Spindle"),
+                                 tr("OCR を実行中です。"));
+        return;
+    }
+    const QVector<QPair<QString, QString>> pages = collectOcrImagePages(*m_book);
+    if (pages.isEmpty()) {
+        QMessageBox::information(
+            this, QStringLiteral("Spindle"),
+            tr("画像ページが見つかりませんでした。この機能は画像ベースの"
+               "固定レイアウト EPUB（雑誌・コミック等）向けです。"));
+        return;
+    }
+
+    // A previous run's sidecar: offer resume (keep finished pages, redo failed
+    // and unprocessed ones) or a full redo — never overwrite silently.
+    const QString sidecarPath = ocrSidecarPathFor(m_epubPath);
+    QHash<QString, QString> previous;
+    bool resume = false;
+    if (QFileInfo::exists(sidecarPath)) {
+        previous = parseOcrSidecar(sidecarPath);
+        int reusable = 0;
+        for (const QPair<QString, QString> &p : pages) {
+            if (previous.contains(p.first))
+                ++reusable;
+        }
+        QMessageBox box(this);
+        box.setWindowTitle(tr("画像ページからテキスト抽出"));
+        box.setIcon(QMessageBox::Question);
+        QPushButton *resumeBtn = nullptr;
+        if (reusable > 0) {
+            box.setText(tr("既存の OCR 結果があります（完了 %1 / 全 %2 ページ）。\n"
+                           "完了済みページを再利用し、失敗・未処理のページだけを"
+                           " OCR しますか？")
+                            .arg(reusable)
+                            .arg(pages.size()));
+            resumeBtn = box.addButton(tr("続きから"), QMessageBox::AcceptRole);
+        } else {
+            box.setText(tr("既存の OCR 結果を上書きします:\n%1").arg(sidecarPath));
+        }
+        QPushButton *redoBtn = box.addButton(tr("最初からやり直す"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        if (qEnvironmentVariableIsSet("SPINDLE_OCR_AUTOTEST")) { // TEMP-AUTOTEST (remove)
+            resume = reusable > 0;
+        } else {
+            box.exec();
+            if (box.clickedButton() == redoBtn)
+                resume = false;
+            else if (resumeBtn && box.clickedButton() == resumeBtn)
+                resume = true;
+            else
+                return;
+        }
+        if (!resume)
+            previous.clear();
+    }
+
+    QSettings settings;
+    const QString savedModel =
+        settings.value(QStringLiteral("ocr/model"), QStringLiteral("glm-ocr:q8_0")).toString();
+    bool accepted = false;
+    QString model; // TEMP-AUTOTEST (remove): bypass wrapper below
+    if (qEnvironmentVariableIsSet("SPINDLE_OCR_AUTOTEST")) {
+        accepted = true;
+        model = savedModel;
+    } else
+    model =
+        QInputDialog::getText(
+            this, tr("画像ページからテキスト抽出"),
+            tr("%1 ページの画像を OCR し、テキストを次のファイルに保存します:\n%2\n\n"
+               "使用する Ollama ビジョンモデル:")
+                .arg(pages.size())
+                .arg(QFileInfo(ocrSidecarPathFor(m_epubPath)).fileName()),
+            QLineEdit::Normal, savedModel, &accepted)
+            .trimmed();
+    if (!accepted || model.isEmpty())
+        return;
+    settings.setValue(QStringLiteral("ocr/model"), model);
+    m_ocrModel = model;
+    m_ocrRetryModel =
+        settings.value(QStringLiteral("ocr/retryModel"), QStringLiteral("glm-ocr:bf16"))
+            .toString();
+
+    m_ocrPages.clear();
+    m_ocrPages.reserve(pages.size());
+    for (const QPair<QString, QString> &p : pages)
+        m_ocrPages.append({p.first, p.second, QString(), false});
+    if (resume) { // prefill reused pages; ocrNext() skips non-empty ones
+        for (OcrPage &p : m_ocrPages) {
+            const auto it = previous.constFind(p.imagePath);
+            if (it != previous.constEnd())
+                p.text = it.value();
+        }
+    }
+    m_ocrCursor = 0;
+    m_ocrDone = 0;
+    m_ocrReqPage = -1;
+    m_ocrConsecutiveFailures = 0;
+    m_ocrAnyOk = false;
+    m_ocrActive = true;
+
+    if (!m_ocrOllama) {
+        m_ocrOllama = new OllamaClient(this);
+        connect(m_ocrOllama, &OllamaClient::finished, this, &MainWindow::onOcrPageFinished);
+    }
+
+    // Signal-driven progress dialog, same pattern as the export/glossary runs.
+    m_ocrDialog = new QDialog(this);
+    m_ocrDialog->setWindowTitle(tr("OCR テキスト抽出"));
+    m_ocrDialog->setWindowModality(Qt::WindowModal);
+    QVBoxLayout *layout = new QVBoxLayout(m_ocrDialog);
+    QLabel *label =
+        new QLabel(tr("画像ページを OCR しています（%1）…").arg(m_ocrModel), m_ocrDialog);
+    label->setWordWrap(true);
+    m_ocrBar = new QProgressBar(m_ocrDialog);
+    m_ocrBar->setRange(0, m_ocrPages.size());
+    m_ocrBar->setValue(0);
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, m_ocrDialog);
+    buttons->button(QDialogButtonBox::Cancel)->setText(tr("キャンセル"));
+    connect(buttons, &QDialogButtonBox::rejected, m_ocrDialog, &QDialog::reject);
+    connect(m_ocrDialog, &QDialog::rejected, this, &MainWindow::cancelOcr);
+    layout->addWidget(label);
+    layout->addWidget(m_ocrBar);
+    layout->addWidget(buttons);
+    m_ocrDialog->show();
+
+    ocrNext();
+}
+
+void MainWindow::ocrNext()
+{
+    if (!m_ocrActive)
+        return;
+    // Sequential on purpose: vision models are heavy, per-page latency is a
+    // few seconds, and in-order progress keeps cancel semantics simple.
+    while (m_ocrCursor < m_ocrPages.size()) {
+        const int pageIndex = m_ocrCursor++;
+        if (!m_ocrPages.at(pageIndex).text.isEmpty()) {
+            // Reused from a previous run (resume) — no model call needed.
+            m_ocrAnyOk = true;
+            ++m_ocrDone;
+            if (m_ocrBar)
+                m_ocrBar->setValue(m_ocrDone);
+            continue;
+        }
+        const QByteArray image = m_book->readBytes(m_ocrPages.at(pageIndex).imagePath);
+        if (image.isEmpty()) {
+            m_ocrPages[pageIndex].failed = true;
+            m_ocrPages[pageIndex].text = tr("（画像を読み込めませんでした）");
+            ++m_ocrDone;
+            if (m_ocrBar)
+                m_ocrBar->setValue(m_ocrDone);
+            continue;
+        }
+        m_ocrReqPage = pageIndex;
+        m_ocrOllama->ocrImage(m_trEndpoint, m_ocrModel, m_ocrRetryModel, image, ++m_ocrReqSeq);
+        return;
+    }
+    finishOcr(false);
+}
+
+void MainWindow::onOcrPageFinished(int requestId, bool ok, const QString &result)
+{
+    if (!m_ocrActive || requestId != m_ocrReqSeq || m_ocrReqPage < 0)
+        return; // canceled run, or a stale reply from one
+    const int pageIndex = m_ocrReqPage;
+    m_ocrReqPage = -1;
+
+    if (ok) {
+        m_ocrAnyOk = true;
+        m_ocrConsecutiveFailures = 0;
+        m_ocrPages[pageIndex].text = result;
+    } else {
+        m_ocrPages[pageIndex].failed = true;
+        m_ocrPages[pageIndex].text = tr("（OCR に失敗しました: %1）").arg(result);
+        // Failures before any success usually mean the server is down or the
+        // model is missing — stop instead of erroring through every page.
+        if (!m_ocrAnyOk && ++m_ocrConsecutiveFailures >= 3) {
+            m_ocrActive = false;
+            m_ocrPages.clear();
+            if (m_ocrDialog) {
+                m_ocrDialog->hide();
+                m_ocrDialog->deleteLater();
+                m_ocrDialog = nullptr;
+                m_ocrBar = nullptr;
+            }
+            QMessageBox::warning(
+                this, QStringLiteral("Spindle"),
+                tr("OCR を中断しました。Ollama の接続とモデル（%1）を確認してください。\n%2")
+                    .arg(m_ocrModel, result));
+            return;
+        }
+    }
+    ++m_ocrDone;
+    if (m_ocrBar)
+        m_ocrBar->setValue(m_ocrDone);
+    ocrNext();
+}
+
+void MainWindow::cancelOcr()
+{
+    if (!m_ocrActive)
+        return;
+    finishOcr(true); // keeps (and saves) the pages finished so far
+}
+
+void MainWindow::finishOcr(bool canceled)
+{
+    m_ocrActive = false;
+    m_ocrReqPage = -1;
+    if (m_ocrDialog) {
+        m_ocrDialog->hide();
+        m_ocrDialog->deleteLater();
+        m_ocrDialog = nullptr;
+        m_ocrBar = nullptr;
+    }
+
+    if (!m_ocrAnyOk || m_ocrDone == 0) {
+        m_ocrPages.clear();
+        if (canceled)
+            statusBar()->showMessage(tr("OCR をキャンセルしました"), 3000);
+        return;
+    }
+
+    // Markdown sidecar: language-neutral metadata as comments, one section
+    // per page in spine order, failures kept in place with a marker so the
+    // page numbering stays aligned with the book.
+    QString md;
+    md += QStringLiteral("# %1\n\n").arg(m_book ? m_book->title()
+                                                : QFileInfo(m_epubPath).completeBaseName());
+    md += QStringLiteral("<!-- source: %1 -->\n").arg(QFileInfo(m_epubPath).fileName());
+    md += QStringLiteral("<!-- ocr-model: %1 -->\n").arg(m_ocrModel);
+    md += QStringLiteral("<!-- date: %1 -->\n").arg(QDate::currentDate().toString(Qt::ISODate));
+    int okCount = 0;
+    int failedCount = 0;
+    QVector<ocr_epub::Page> epubPages;
+    for (int i = 0; i < m_ocrDone && i < m_ocrPages.size(); ++i) {
+        const OcrPage &p = m_ocrPages.at(i);
+        QString title = QStringLiteral("Page %1").arg(i + 1);
+        if (!p.label.isEmpty())
+            title += QStringLiteral(" — %1").arg(p.label);
+        md += QStringLiteral("\n---\n\n## %1\n\n").arg(title);
+        md += QStringLiteral("<!-- image: %1 -->\n").arg(p.imagePath);
+        if (p.failed) {
+            md += QStringLiteral("<!-- OCR_FAILED -->\n");
+            ++failedCount;
+        } else {
+            ++okCount;
+        }
+        md += QStringLiteral("\n") + p.text + QStringLiteral("\n");
+        epubPages.append({title, p.text, p.failed});
+    }
+    const int total = m_ocrPages.size();
+    const bool complete = !canceled && m_ocrDone >= total;
+    m_ocrPages.clear();
+
+    const QString path = ocrSidecarPathFor(m_epubPath);
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write(md.toUtf8()) < 0 || !f.commit()) {
+        QMessageBox::warning(this, QStringLiteral("Spindle"),
+                             tr("OCR テキストを保存できませんでした:\n%1").arg(f.errorString()));
+        return;
+    }
+
+    QStringList lines;
+    if (canceled)
+        lines << tr("キャンセルしました。ここまでの結果を保存しました。");
+    lines << tr("OCR テキストを保存しました（成功 %1 / 全 %2 ページ）。").arg(okCount).arg(total);
+    if (failedCount > 0)
+        lines << tr("%1 ページは失敗し、本文中に OCR_FAILED マークを残しています。")
+                     .arg(failedCount);
+    lines << path;
+
+    // A complete run additionally becomes a reflowable text EPUB, so the
+    // extracted text can be read with every normal feature (search,
+    // translation, read-aloud, summaries). Partial runs stay Markdown-only —
+    // resume the OCR to complete them first.
+    if (complete && m_book) {
+        const QString epubPath = ocrEpubPathFor(m_epubPath);
+        QString epubErr;
+        if (ocr_epub::write(epubPath, m_book->title() + QStringLiteral(" (OCR)"),
+                            m_book->language(), m_book->verticalRtl(), epubPages,
+                            &epubErr)) {
+            lines << QString();
+            lines << tr("読書用のテキスト EPUB も書き出しました:");
+            lines << epubPath;
+        } else {
+            lines << tr("テキスト EPUB の書き出しに失敗しました: %1").arg(epubErr);
+        }
+    }
+    QMessageBox::information(this, QStringLiteral("Spindle"), lines.join(QLatin1Char('\n')));
 }
 
 void MainWindow::openSummarySettingsDialog()
