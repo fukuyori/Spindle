@@ -22,6 +22,10 @@ public:
         QString note;
     };
 
+    // Which task the prompt block is for — the wording differs (translation
+    // asks for exact target renderings; summary asks to write terms as given).
+    enum class Purpose { Translation, Summary };
+
     // Load the entries for (epubPath, lang). Resets state; safe to call again on
     // language change. No-op if either is empty or the file is missing/invalid.
     void load(const QString &epubPath, const QString &lang);
@@ -47,9 +51,16 @@ public:
     int size() const { return m_entries.size(); }
     const QVector<Entry> &entries() const { return m_entries; }
 
-    // Instruction block to append to the system prompt ("" when empty).
-    QString promptBlock() const;
-    QString promptBlockForText(const QString &text) const;
+    // One-line instruction block for the entries appearing in `text`, sized to
+    // the text ("" when nothing matches). Sent in both the system and user
+    // turns — translation-tuned models (TranslateGemma) only read the latter.
+    QString promptBlockForText(const QString &text,
+                               Purpose purpose = Purpose::Translation) const;
+
+    // The target for a text that IS exactly one glossary term (e.g. a chapter
+    // heading that is just a person's name), "" otherwise. Callers use it to
+    // skip the model round-trip, which could only mangle the mandated form.
+    QString exactTarget(const QString &text) const;
 
 private:
     QVector<Entry> m_entries;

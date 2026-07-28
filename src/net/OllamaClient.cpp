@@ -184,10 +184,19 @@ void OllamaClient::translateAttempt(const QString &endpoint, const QString &mode
     // The wording is load-bearing: "to Japanese. Provide only the
     // translation…" made gemma answer in the source language, while this
     // phrasing tested clean on both model families — don't reword casually.
+    // The glossary rides in the user turn too, inside the task statement.
+    // Placement is load-bearing (tested on TranslateGemma): put before the
+    // task line, the model answers "no text to translate"; put after the
+    // text, it can translate the glossary itself. In the task line both a
+    // 20-entry list and a one-term text translated correctly.
     QString user =
-        QStringLiteral("Translate the following text into %1. "
-                       "Output only the %1 translation:\n\n%2")
-            .arg(targetLang, text);
+        glossary.isEmpty()
+            ? QStringLiteral("Translate the following text into %1. "
+                             "Output only the %1 translation:\n\n%2")
+                  .arg(targetLang, text)
+            : QStringLiteral("Translate the following text into %1. "
+                             "Output only the %1 translation. %2\n\n%3")
+                  .arg(targetLang, glossary.trimmed(), text);
     if (attempt > 1) {
         // Retry after a wrong-language reply: nudge the sampling with an
         // explicit reminder (an identical request at low temperature would
@@ -384,8 +393,13 @@ void OllamaClient::summarize(const QString &endpoint, const QString &model,
     QJsonArray messages;
     messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
                                 {QStringLiteral("content"), system}});
+    // Like translate(): the glossary rides in the user turn inside the task
+    // statement — never before it, which derails translation-tuned models.
     const QString user =
-        QStringLiteral("Summarize the following text in %1 only.\n\n%2").arg(target, text);
+        glossary.isEmpty()
+            ? QStringLiteral("Summarize the following text in %1 only.\n\n%2").arg(target, text)
+            : QStringLiteral("Summarize the following text in %1 only. %2\n\n%3")
+                  .arg(target, glossary.trimmed(), text);
     messages.append(QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
                                 {QStringLiteral("content"), user}});
     body[QStringLiteral("messages")] = messages;

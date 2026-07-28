@@ -4,6 +4,24 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-07-28
+
+### Fixed
+- **Glossary terms now reliably reach the model.** The glossary is sent inside
+  the user-turn task statement as well as the system prompt (translation-tuned
+  models weigh the former), reworded per task (translation vs. summary), and
+  emitted as one terse line instead of an instruction paragraph. The term list
+  is capped relative to the text length so a large glossary can no longer
+  drown a short paragraph and derail the translation.
+- **Glossary matching misses fewer occurrences.** Terms whose edges are CJK
+  characters match inside unspaced Japanese/Chinese prose (the word-boundary
+  guard no longer applies there), and English entries also match simple
+  plural/possessive forms ("Caesars", "Caesar's").
+- **Blocks that are exactly one glossary term skip the model.** Headings such
+  as a bare person's name are rendered directly with the glossary target — in
+  page translation, selection translation, and EPUB export — instead of
+  risking a model round-trip mangling the mandated form.
+
 ## [0.7.0] - 2026-07-19
 
 ### Added
@@ -631,6 +649,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.7.1]: https://github.com/fukuyori/Spindle/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/fukuyori/Spindle/compare/v0.6.6...v0.7.0
 [0.6.6]: https://github.com/fukuyori/Spindle/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/fukuyori/Spindle/compare/v0.6.4...v0.6.5

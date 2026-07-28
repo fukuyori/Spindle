@@ -2944,6 +2944,18 @@ void MainWindow::exportTranslatedEpub(int mode)
     QStringList missing;
     if (translationNeeded)
         missing = translated_epub::collectMissing(*m_book, m_trCache);
+    // Paragraphs that are exactly one glossary term resolve without the model.
+    bool seeded = false;
+    for (qsizetype i = missing.size() - 1; i >= 0; --i) {
+        const QString direct = m_trGlossary.exactTarget(missing.at(i));
+        if (!direct.isEmpty()) {
+            m_trCache.put(missing.at(i), direct);
+            missing.removeAt(i);
+            seeded = true;
+        }
+    }
+    if (seeded)
+        m_trCache.flush();
     if (missing.isEmpty()) {
         finishTranslatedEpubExport();
         return;
@@ -3203,6 +3215,17 @@ void MainWindow::onBlocksReady(const QString &json)
         const QJsonObject o = v.toObject();
         const int index = o.value(QStringLiteral("index")).toInt();
         const QString text = o.value(QStringLiteral("text")).toString();
+        // A block that is exactly one glossary term (a heading that is just a
+        // name, say) skips the model: the round-trip could only mangle the
+        // mandated rendering. Wins over any stale cached translation too.
+        const QString direct = m_trGlossary.exactTarget(text);
+        if (!direct.isEmpty()) {
+            m_trCache.put(text, direct);
+            m_trCacheSave->start();
+            if (m_bridge)
+                m_bridge->applyTranslation(index, direct, QString());
+            continue;
+        }
         // Cache hit → apply instantly without calling Ollama (unless re-translating).
         if (!force) {
             const QString cached = m_trCache.lookup(text);
@@ -3276,6 +3299,11 @@ void MainWindow::translateSelection(const QString &text)
     const QString src = text.trimmed();
     if (src.isEmpty())
         return;
+    const QString direct = m_trGlossary.exactTarget(src);
+    if (!direct.isEmpty()) { // the selection is exactly one glossary term
+        showTranslatePopup(direct);
+        return;
+    }
     showTranslatePopup(tr("翻訳中…"));
     m_selectionOllama->translate(m_trEndpoint, m_trModel, targetLanguageNameAndLabel(m_trTarget), src,
                                  m_trGlossary.promptBlockForText(src), ++m_selectionReqSeq,
@@ -3305,7 +3333,8 @@ void MainWindow::summarizeSelection(const QString &text)
     m_summaryReqIsTranslate = false;
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), src, summaryDetailInstruction(),
-                               m_trGlossary.promptBlockForText(src), ++m_summaryReqSeq);
+                               m_trGlossary.promptBlockForText(src, Glossary::Purpose::Summary),
+                               ++m_summaryReqSeq);
 }
 
 void MainWindow::summarizeCurrentChapter()
@@ -3374,7 +3403,8 @@ void MainWindow::generateCurrentChapterSummary(bool force)
     m_summaryReqIsTranslate = false;
     m_summaryOllama->summarize(m_trEndpoint, effectiveSummaryModel(),
                                targetLanguagePrompt(m_trTarget), text, summaryDetailInstruction(),
-                               m_trGlossary.promptBlockForText(text), ++m_summaryReqSeq);
+                               m_trGlossary.promptBlockForText(text, Glossary::Purpose::Summary),
+                               ++m_summaryReqSeq);
 }
 
 void MainWindow::openSavedCurrentChapterSummary()

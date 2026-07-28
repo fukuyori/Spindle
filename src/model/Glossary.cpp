@@ -6,26 +6,25 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 
-namespace {
+#include <algorithm>
 
-QString promptBlockFromEntries(const QVector<Glossary::Entry> &entries)
-{
-    if (entries.isEmpty())
-        return {};
-    QString block = QStringLiteral(
-        "\n\nGlossary — always translate these terms with the exact given target, "
-        "keeping usage consistent (adjust only for grammatical inflection):");
-    for (const Glossary::Entry &e : entries) {
-        block += QStringLiteral("\n- %1 => %2").arg(e.source, e.target);
-        if (!e.note.isEmpty())
-            block += QStringLiteral(" (%1)").arg(e.note);
-    }
-    return block;
-}
+namespace {
 
 bool isWordish(QChar c)
 {
     return c.isLetterOrNumber() || c == QLatin1Char('_');
+}
+
+// CJK prose is written without spaces, so a term inside running Japanese or
+// Chinese text never sits at a "word boundary" — the boundary guards must be
+// skipped for CJK-edged terms or they would never match mid-sentence.
+bool isCjk(QChar c)
+{
+    const ushort u = c.unicode();
+    return (u >= 0x3040 && u <= 0x30FF) // hiragana + katakana
+        || (u >= 0x3400 && u <= 0x9FFF) // Han (ext-A + unified)
+        || (u >= 0xF900 && u <= 0xFAFF) // Han compatibility
+        || (u >= 0xAC00 && u <= 0xD7A3); // hangul
 }
 
 } // namespace
@@ -36,10 +35,13 @@ bool Glossary::appearsInText(const QString &source, const QString &text)
         return false;
 
     QString pattern = QRegularExpression::escape(source);
-    if (isWordish(source.front()))
+    if (isWordish(source.front()) && !isCjk(source.front()))
         pattern.prepend(QStringLiteral("(?<![\\p{L}\\p{N}_])"));
-    if (isWordish(source.back()))
-        pattern.append(QStringLiteral("(?![\\p{L}\\p{N}_])"));
+    if (isWordish(source.back()) && !isCjk(source.back())) {
+        // Tolerate common English inflection so "Caesar" still selects the
+        // entry in a block that only has "Caesars" / "Caesar's".
+        pattern.append(QStringLiteral("(?:'s|es|s)?(?![\\p{L}\\p{N}_])"));
+    }
 
     QRegularExpression re(pattern, QRegularExpression::CaseInsensitiveOption
                                        | QRegularExpression::UseUnicodePropertiesOption);
@@ -140,12 +142,7 @@ void Glossary::load(const QString &epubPath, const QString &lang)
     m_entries = entries;
 }
 
-QString Glossary::promptBlock() const
-{
-    return promptBlockFromEntries(m_entries);
-}
-
-QString Glossary::promptBlockForText(const QString &text) const
+QString Glossary::promptBlockForText(const QString &text, Purpose purpose) const
 {
     QVector<Entry> matched;
     matched.reserve(m_entries.size());
@@ -153,5 +150,49 @@ QString Glossary::promptBlockForText(const QString &text) const
         if (appearsInText(e.source, text))
             matched.append(e);
     }
-    return promptBlockFromEntries(matched);
+    if (matched.isEmpty())
+        return {};
+
+    // Longest source first, so the most specific terms survive the size cap.
+    std::stable_sort(matched.begin(), matched.end(), [](const Entry &a, const Entry &b) {
+        return a.source.size() > b.source.size();
+    });
+
+    // A glossary that dwarfs the text drowns it: with a short block the model
+    // answers with translated glossary lines instead of the translation. Cap
+    // the term list near the text's own length, with a floor so ordinary
+    // paragraphs still get a handful of terms. The first matched entry is
+    // always sent — an empty block would silently drop the glossary.
+    const qsizetype budget = qMax(qsizetype(200), text.size() * 3 / 2);
+    QStringList items;
+    qsizetype used = 0;
+    for (const Entry &e : matched) {
+        const QString item = QStringLiteral("%1 => %2").arg(e.source, e.target);
+        if (!items.isEmpty() && used + item.size() > budget)
+            break;
+        items.append(item);
+        used += item.size() + 2;
+    }
+
+    // One terse line, not an instruction paragraph: next to a short source
+    // text, long instructions get treated as content to translate.
+    const QString header =
+        purpose == Purpose::Summary
+            ? QStringLiteral("Write these terms exactly as given: ")
+            : QStringLiteral("Use exactly these translations, inflected only as grammar "
+                             "requires: ");
+    return QStringLiteral("\n\n") + header + items.join(QStringLiteral("; "))
+        + QStringLiteral(".");
+}
+
+QString Glossary::exactTarget(const QString &text) const
+{
+    const QString t = text.trimmed();
+    if (t.isEmpty())
+        return {};
+    for (const Entry &e : m_entries) {
+        if (t.compare(e.source, Qt::CaseInsensitive) == 0)
+            return e.target;
+    }
+    return {};
 }
