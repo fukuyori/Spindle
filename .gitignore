@@ -3,7 +3,6 @@
 /build-*/
 /dist/
 /scripts/.cache/
-/scripts/package-macos.sh
 
 # Local sample books (personal / copyrighted — do not publish)
 /sample/
