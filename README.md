@@ -72,18 +72,6 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 - **Translated EPUB export** — generate a bilingual or translation-only `.epub`
   from the cache (missing paragraphs are translated on export); the output's
   language metadata is set to the target language.
-- **OCR text extraction** — for image-based fixed-layout books (magazines,
-  comics), **Translation → Extract Text from Image Pages (OCR)…** runs every
-  page image through an Ollama vision model (default `glm-ocr:q8_0`) and saves
-  the text as `<book>.ocr.md` in reading order. Replies that collapse into
-  repetition are detected and retried with a fallback model; still-failing
-  pages are kept in place with an `OCR_FAILED` marker, and canceling saves the
-  pages finished so far. When previous results exist you can **resume**
-  (reusing finished pages and redoing only failed/unprocessed ones) instead of
-  starting over. A complete run also produces **`<book>.ocr.epub`** — a
-  reflowable text EPUB (one chapter per page; vertical right-to-left when the
-  source book is) that works with search, translation, summaries, and
-  read-aloud like any text book.
 - **Read-aloud (TTS)** — speak the current chapter block by block using the
   OS speech voices (Qt TextToSpeech: WinRT/SAPI, AVSpeechSynthesizer,
   speech-dispatcher). The translation-only view reads the translation; the
@@ -198,8 +186,6 @@ For a book `Foo.epub`, files are named after the base name `Foo`:
 | `<book>.<lang>.json` | translation cache for a target language (e.g. `Foo.ja.json`) |
 | `<book>.glossary.json` | optional glossary (hand-written, or generated via Translation → Generate Glossary…) |
 | `<book>.summaries.json` | saved chapter summaries |
-| `<book>.ocr.md` | OCR text extracted from image pages (Translation → Extract Text from Image Pages (OCR)…) |
-| `<book>.ocr.epub` | reflowable text EPUB generated from a complete OCR run |
 
 #### Glossary format
 

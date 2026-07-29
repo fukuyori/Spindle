@@ -30,7 +30,8 @@ jobs:
             build-essential cmake ninja-build \
             libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0 \
             libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 \
-            libasound2 libfuse2 fuse desktop-file-utils
+            libasound2 libfuse2 fuse desktop-file-utils \
+            libspeechd2
 
       - uses: jurplel/install-qt-action@v4
         with:
@@ -65,7 +66,9 @@ jobs:
           cache: true
 
       - name: Package (.dmg)
-        run: ./scripts/package-macos.sh
+        # bash <file> instead of ./<file>: does not rely on the exec bit
+        # being recorded in git for the script.
+        run: bash ./scripts/package-macos.sh
         env:
           CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
 
@@ -89,11 +92,22 @@ jobs:
           cache: true
 
       - name: Install NSIS (for the installer)
-        run: choco install nsis -y --no-progress
+        # choco does not shim makensis — put the install dir on PATH so
+        # package-windows.ps1 finds it (otherwise it silently skips the
+        # installer and only the portable zip is produced).
+        run: |
+          choco install nsis -y --no-progress
+          echo "${env:ProgramFiles(x86)}\NSIS" >> $env:GITHUB_PATH
+
+      # package-windows.ps1 is packaging-only by design (it never rebuilds, so
+      # a code signature on spindle.exe survives) — build first.
+      - name: Build
+        shell: pwsh
+        run: ./scripts/build.ps1 -QtPrefix $env:QT_ROOT_DIR
 
       - name: Package (portable zip + installer)
         shell: pwsh
-        run: ./scripts/package-windows.ps1 -QtPrefix $env:QT_ROOT_DIR
+        run: ./scripts/package-windows.ps1
 
       - uses: actions/upload-artifact@v4
         with:

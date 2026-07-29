@@ -4,24 +4,31 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.3] - 2026-07-29
+
+### Removed
+- **OCR text extraction** (introduced in 0.7.2). The in-app feature — the
+  Translation-menu action, the `<book>.ocr.md` / `<book>.ocr.epub` outputs,
+  and the Ollama vision-model plumbing behind them — was removed.
+
 ## [0.7.2] - 2026-07-28
 
 ### Added
-- **OCR text extraction for image-based books.** 翻訳メニュー（および AI
-  ボタン）の「画像ページからテキスト抽出 (OCR)…」で、固定レイアウト
-  EPUB（雑誌・コミック等）の全画像ページを Ollama のビジョンモデル
-  （既定 `glm-ocr:q8_0`、実行時に変更可、`ocr/model` として保存）で
-  OCR し、spine 順の Markdown サイドカー `<book>.ocr.md` に保存する。
-  同一フレーズを繰り返す「崩壊」応答は検知してリトライモデル
-  （`ocr/retryModel`、既定 `glm-ocr:bf16`）で1回再試行し、それでも
-  失敗したページは `OCR_FAILED` マーク付きで残す。キャンセルは
-  完了済みページを保存する。連続失敗時（サーバー停止・モデル未導入）
-  は早期中断する。既存の `<book>.ocr.md` がある場合は黙って上書きせず、
-  **続きから（完了済みページを再利用し、失敗・未処理のみ再実行）／
-  最初からやり直す**を選択できる。全ページ完了時には、抽出テキストを
-  本文とするリフロー型の **`<book>.ocr.epub`**（1ページ=1章、縦書き本は
-  縦書き・右綴じ）も生成し、検索・翻訳・要約・読み上げなど既存機能を
-  そのまま使えるようにする。
+- **OCR text extraction for image-based books.** Translation menu (and the AI
+  toolbar button) gained **Extract Text from Image Pages (OCR)…**, which ran
+  every image page of a fixed-layout EPUB (magazines, comics) through an
+  Ollama vision model (default `glm-ocr:q8_0`, changeable per run, saved as
+  `ocr/model`) and wrote the text to a Markdown sidecar `<book>.ocr.md` in
+  spine order. Replies collapsing into endless repetition were detected and
+  retried once with a fallback model (`ocr/retryModel`, default
+  `glm-ocr:bf16`); still-failing pages kept an `OCR_FAILED` marker. Canceling
+  saved the pages finished so far, and consecutive failures at the start
+  (server down, missing model) aborted early. With existing results the run
+  offered **resume** (reuse finished pages, redo failed/unprocessed ones)
+  instead of overwriting silently, and a complete run also generated
+  **`<book>.ocr.epub`** — a reflowable text EPUB (one chapter per page,
+  vertical right-to-left when the source book is) usable with search,
+  translation, summaries, and read-aloud.
 
 ## [0.7.1] - 2026-07-28
 
@@ -668,6 +675,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.7.3]: https://github.com/fukuyori/Spindle/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/fukuyori/Spindle/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/fukuyori/Spindle/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/fukuyori/Spindle/compare/v0.6.6...v0.7.0
