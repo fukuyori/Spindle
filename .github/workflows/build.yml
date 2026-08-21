@@ -91,23 +91,22 @@ jobs:
           modules: ${{ env.QT_MODULES }}
           cache: true
 
-      - name: Install NSIS (for the installer)
-        # choco does not shim makensis — put the install dir on PATH so
-        # package-windows.ps1 finds it (otherwise it silently skips the
-        # installer and only the portable zip is produced).
-        run: |
-          choco install nsis -y --no-progress
-          echo "${env:ProgramFiles(x86)}\NSIS" >> $env:GITHUB_PATH
-
-      # package-windows.ps1 is packaging-only by design (it never rebuilds, so
-      # a code signature on spindle.exe survives) — build first.
+      # The packaging scripts are packaging-only by design (they never rebuild,
+      # so a code signature on spindle.exe survives) — build first.
       - name: Build
         shell: pwsh
         run: ./scripts/build.ps1 -QtPrefix $env:QT_ROOT_DIR
 
-      - name: Package (portable zip + installer)
+      - name: Package (portable zip)
         shell: pwsh
         run: ./scripts/package-windows.ps1
+
+      # Inno Setup 6 is preinstalled on the windows runner image. These
+      # installers are unsigned: the signing certificate lives on a hardware
+      # token, so `-Sign` only works on a machine with the token attached.
+      - name: Package (installer)
+        shell: pwsh
+        run: ./scripts/package-windows-inno.ps1
 
       - uses: actions/upload-artifact@v4
         with:

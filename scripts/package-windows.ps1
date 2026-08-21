@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
-  Package an already-built Spindle as a portable ZIP and, if NSIS (makensis)
-  is available, an installer .exe.
+  Package an already-built Spindle as a portable ZIP.
 .DESCRIPTION
   Packaging only — it does not build. Run scripts/build.ps1 first; this script
   only stages that existing build output into dist\Spindle and archives it, so
   it never triggers a rebuild that would invalidate a prior signature.
 
-  With -Sign it Authenticode-signs the staged executables, the installer and
-  the uninstaller (NSIS !finalize / !uninstfinalize). The identity comes from
-  the CODESIGN_CERT environment variable — see scripts/codesign-windows.ps1.
+  With -Sign it Authenticode-signs the staged executables. The identity comes
+  from the CODESIGN_CERT environment variable — see
+  scripts/codesign-windows.ps1. For an installer, use
+  scripts/package-windows-inno.ps1.
 .EXAMPLE
   pwsh scripts/build.ps1
   pwsh scripts/package-windows.ps1
@@ -17,7 +17,7 @@
   $env:CODESIGN_CERT = "My Publisher Name"
   pwsh scripts/package-windows.ps1 -Sign
 .OUTPUTS
-  dist\Spindle-<version>-windows-<arch>.zip  (+ ...-windows-<arch>.exe with NSIS)
+  dist\Spindle-<version>-windows-<arch>.zip
 #>
 param(
   [string]$BuildDir = "",
@@ -126,58 +126,5 @@ $zip = Join-Path $distDir "Spindle-$version-windows-$arch.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Write-Host "==> Creating $zip"
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
-
-# Optional NSIS installer
-$makensis = Get-Command makensis -ErrorAction SilentlyContinue
-if ($makensis) {
-  Write-Host "==> Building NSIS installer"
-
-  # NSIS signs its own output: !finalize runs on the installer, !uninstfinalize
-  # on the uninstaller stub before it is compressed into the installer.
-  $signDirectives = ""
-  if ($Sign) {
-    $signLine = Get-CodeSignCommandLine -FileToken '"%1"' -SignTool $SignTool
-    $signDirectives = @"
-!finalize '$signLine'
-!uninstfinalize '$signLine'
-"@
-  }
-
-  $nsi = Join-Path $distDir "spindle.nsi"
-@"
-!include "MUI2.nsh"
-Name "Spindle"
-OutFile "Spindle-$version-windows-$arch.exe"
-InstallDir "`$PROGRAMFILES64\Spindle"
-RequestExecutionLevel admin
-$signDirectives
-!insertmacro MUI_PAGE_DIRECTORY
-!insertmacro MUI_PAGE_INSTFILES
-!insertmacro MUI_UNPAGE_CONFIRM
-!insertmacro MUI_UNPAGE_INSTFILES
-!insertmacro MUI_LANGUAGE "English"
-Section "Install"
-  SetOutPath "`$INSTDIR"
-  File /r "Spindle\*.*"
-  CreateShortcut "`$SMPROGRAMS\Spindle.lnk" "`$INSTDIR\spindle.exe"
-  WriteUninstaller "`$INSTDIR\uninstall.exe"
-SectionEnd
-Section "Uninstall"
-  Delete "`$SMPROGRAMS\Spindle.lnk"
-  RMDir /r "`$INSTDIR"
-SectionEnd
-"@ | Set-Content -Encoding UTF8 $nsi
-  Push-Location $distDir
-  try {
-    & $makensis.Source $nsi
-    if ($LASTEXITCODE -ne 0) { throw "makensis exited with code $LASTEXITCODE" }
-  } finally {
-    Pop-Location
-    Remove-Item $nsi -Force -ErrorAction SilentlyContinue
-  }
-} else {
-  Write-Host "==> makensis not found — skipping installer (portable ZIP produced)."
-  Write-Host "    Install NSIS (https://nsis.sourceforge.io) to also build a setup.exe."
-}
 
 Write-Host "==> Done. Packages in: $distDir"

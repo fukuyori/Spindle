@@ -3,8 +3,8 @@
   Authenticode signing helpers shared by the Windows packaging scripts.
 .DESCRIPTION
   Dot-source this file, then call Invoke-CodeSign (to sign files directly) or
-  Get-CodeSignCommandLine (to hand a sign command to NSIS / Inno Setup, which
-  sign the installer and uninstaller themselves).
+  Get-CodeSignCommandLine (to hand a sign command to Inno Setup, which signs
+  the installer and the uninstaller itself).
 
   The signing identity comes from the CODESIGN_CERT environment variable:
     - a .pfx / .p12 file path  -> signtool /f (password from CODESIGN_PASSWORD)
@@ -178,9 +178,8 @@ function Invoke-CodeSign {
   Render the signtool invocation as a single command line for an installer
   builder that signs its own output.
 .PARAMETER FileToken
-  The builder's placeholder for the file being signed — '"%1"' for NSIS
-  !finalize / !uninstfinalize, '$f' for an Inno Setup SignTool command (Inno
-  quotes $f itself).
+  The builder's placeholder for the file being signed — '$f' for an Inno Setup
+  SignTool command (Inno quotes $f itself).
 .PARAMETER QuoteToken
   How to quote an argument. Inno Setup wants its own '$q' escape rather than a
   literal double quote.

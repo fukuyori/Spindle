@@ -258,7 +258,7 @@ cmake --build build --config Release
 ```sh
 ./scripts/package-macos.sh              # → .dmg
 ./scripts/package-linux.sh              # → .AppImage + .deb / .tar.gz
-pwsh scripts/package-windows.ps1        # → 携帯版 .zip（NSIS があればインストーラ .exe）
+pwsh scripts/package-windows.ps1        # → 携帯版 .zip
 pwsh scripts/package-windows-inno.ps1   # → Inno Setup インストーラ .exe
 ```
 
@@ -286,7 +286,7 @@ Authenticode 署名を付与します（証明書は `CODESIGN_CERT` に `.pfx` 
 
 - **Linux** → AppImage + `.deb` / `.tar.gz`
 - **macOS** → `.dmg`
-- **Windows** → 携帯版 `.zip` + NSIS / Inno Setup インストーラ `.exe`
+- **Windows** → 携帯版 `.zip` + Inno Setup インストーラ `.exe`
 
 各実行で成果物がアップロードされます。`v0.3.5` のようなタグを push すると、
 全パッケージを添付した GitHub Release も自動作成されます。

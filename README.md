@@ -281,7 +281,7 @@ for distribution (output in `dist/`):
 ```sh
 ./scripts/package-macos.sh              # → .dmg
 ./scripts/package-linux.sh              # → .AppImage + .deb / .tar.gz
-pwsh scripts/package-windows.ps1        # → portable .zip (+ NSIS installer .exe)
+pwsh scripts/package-windows.ps1        # → portable .zip
 pwsh scripts/package-windows-inno.ps1   # → Inno Setup installer .exe
 ```
 
@@ -307,7 +307,7 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 
 - **Linux** → AppImage + `.deb` / `.tar.gz`
 - **macOS** → `.dmg`
-- **Windows** → portable `.zip` + NSIS / Inno Setup installer `.exe`
+- **Windows** → portable `.zip` + Inno Setup installer `.exe`
 
 Artifacts are uploaded for every run. Push a tag like `v0.3.5` to also publish a
 GitHub Release with all packages attached.

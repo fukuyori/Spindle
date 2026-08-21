@@ -8,7 +8,7 @@ Cross-platform helpers. All output packages land in `dist/`.
 | `build.ps1` | Windows | local build in `build/` |
 | `package-macos.sh` | macOS | `.dmg` (Qt bundled) |
 | `package-linux.sh` | Linux | `.AppImage` + `.deb` / `.tar.gz` |
-| `package-windows.ps1` | Windows | portable `.zip` (+ NSIS installer `.exe`) |
+| `package-windows.ps1` | Windows | portable `.zip` |
 | `package-windows-inno.ps1` | Windows | Inno Setup installer `.exe` |
 | `codesign-windows.ps1` | Windows | (helper) Authenticode signing, dot-sourced by the two above |
 
@@ -45,7 +45,7 @@ SKIP_APPIMAGE=1 ./scripts/package-linux.sh    # only CPack deb/tgz
 # Windows — build first; the packaging scripts never rebuild
 pwsh scripts/build.ps1 -QtPrefix C:\Qt\6.8.0\msvc2022_64
 
-pwsh scripts/package-windows.ps1        # portable zip (+ installer if NSIS is installed)
+pwsh scripts/package-windows.ps1        # portable zip
 pwsh scripts/package-windows-inno.ps1   # Inno Setup installer
 
 # ...and with Authenticode signatures on the executables, the installer
@@ -57,9 +57,9 @@ pwsh scripts/package-windows-inno.ps1 -Sign
 ## Windows code signing (`-Sign`)
 
 Both Windows packaging scripts take `-Sign`. It signs the staged executables,
-the installer, and the uninstaller (through NSIS `!finalize` / `!uninstfinalize`
-and Inno Setup's `SignTool` / `SignedUninstaller`). Binaries somebody else
-already signed — Qt's `QtWebEngineProcess.exe`, Microsoft's `vc_redist.x64.exe`
+and `package-windows-inno.ps1` additionally signs the installer and the
+uninstaller (through Inno Setup's `SignTool` / `SignedUninstaller`). Binaries
+somebody else already signed — Qt's `QtWebEngineProcess.exe`, Microsoft's `vc_redist.x64.exe`
 — are left untouched, because `signtool` replaces a signature rather than
 appending one.
 
@@ -80,7 +80,7 @@ a later rebuild cannot ship a stale signature.
   bundle the Qt WebEngine runtime (`QtWebEngineProcess`, locales, resources)
   needed for chapter rendering.
 - Windows packaging scripts first deploy the Qt runtime into the build output
-  directory, then stage that deployed build output for ZIP / NSIS / Inno Setup
+  directory, then stage that deployed build output for ZIP / Inno Setup
   packaging.
 - macOS `.dmg` is only **ad-hoc signed**. For distribution outside your own
   machine, `codesign` with a Developer ID identity and notarize
