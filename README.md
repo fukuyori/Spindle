@@ -279,11 +279,16 @@ Convenience scripts in [`scripts/`](scripts/README.md) build and bundle Spindle
 for distribution (output in `dist/`):
 
 ```sh
-./scripts/package-macos.sh                       # → Spindle-<ver>-macOS.dmg
-./scripts/package-linux.sh                       # → AppImage + .deb / .tar.gz
-pwsh scripts/package-windows.ps1 -QtPrefix ...   # → portable .zip (+ NSIS setup.exe)
-pwsh scripts/package-windows-inno.ps1 -QtPrefix ... # → Inno Setup setup.exe
+./scripts/package-macos.sh              # → .dmg
+./scripts/package-linux.sh              # → .AppImage + .deb / .tar.gz
+pwsh scripts/package-windows.ps1        # → portable .zip (+ NSIS installer .exe)
+pwsh scripts/package-windows-inno.ps1   # → Inno Setup installer .exe
 ```
+
+Packages are named `Spindle-<version>-<os>-<arch>.<ext>`. On Windows, add
+`-Sign` (with `CODESIGN_CERT` set to a `.pfx` path, a certificate thumbprint or
+a subject name) to Authenticode-sign the executables, the installer and the
+uninstaller — see [`scripts/README.md`](scripts/README.md).
 
 The deploy tools bundle the Qt WebEngine runtime so the app is self-contained.
 
@@ -302,7 +307,7 @@ all three platforms on every push/PR using the official Qt (via `aqtinstall`):
 
 - **Linux** → AppImage + `.deb` / `.tar.gz`
 - **macOS** → `.dmg`
-- **Windows** → portable `.zip` + NSIS / Inno Setup `setup.exe`
+- **Windows** → portable `.zip` + NSIS / Inno Setup installer `.exe`
 
 Artifacts are uploaded for every run. Push a tag like `v0.3.5` to also publish a
 GitHub Release with all packages attached.

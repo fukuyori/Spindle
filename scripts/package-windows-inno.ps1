@@ -2,26 +2,37 @@
 .SYNOPSIS
   Create an Inno Setup installer from an already-built Spindle.
 .DESCRIPTION
-  Packaging only — it does not build or sign anything. Run scripts/build.ps1
-  first (and code-sign build\spindle.exe yourself, if you sign releases);
-  this script only stages that existing build output and hands it to Inno
-  Setup 6 (ISCC.exe), so it never triggers a rebuild that would invalidate a
-  prior signature.
+  Packaging only — it does not build. Run scripts/build.ps1 first; this script
+  only stages that existing build output and hands it to Inno Setup 6
+  (ISCC.exe), so it never triggers a rebuild that would invalidate a prior
+  signature.
+
+  With -Sign it Authenticode-signs the staged executables, and lets Inno Setup
+  sign the installer and the uninstaller (SignTool + SignedUninstaller). The
+  identity comes from the CODESIGN_CERT environment variable — see
+  scripts/codesign-windows.ps1.
 .EXAMPLE
   pwsh scripts/build.ps1
   pwsh scripts/package-windows-inno.ps1
+.EXAMPLE
+  $env:CODESIGN_CERT = "My Publisher Name"
+  pwsh scripts/package-windows-inno.ps1 -Sign
 .OUTPUTS
-  dist\Spindle-<version>-windows-x64-inno-setup.exe
+  dist\Spindle-<version>-windows-<arch>.exe
 #>
 param(
   [string]$BuildDir = "",
-  [string]$InnoCompiler = $env:ISCC_EXE
+  [string]$InnoCompiler = $env:ISCC_EXE,
+  [switch]$Sign,
+  [string]$SignTool = $env:SIGNTOOL_EXE
 )
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $BuildDir) { $BuildDir = Join-Path $root "build" }
 $distDir = Join-Path $root "dist"
+
+. (Join-Path $PSScriptRoot "codesign-windows.ps1")
 
 function Resolve-InnoCompiler {
   param([string]$Requested)
@@ -89,10 +100,37 @@ function Copy-DeployedBuildOutput {
   }
 }
 
+# Package names carry the architecture the binary was actually built for, which
+# the Qt kit picks — read it out of the PE header rather than guessing from the
+# host.
+function Get-PeArchitecture {
+  param([string]$Path)
+
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $reader = New-Object System.IO.BinaryReader($stream)
+    $stream.Position = 0x3C
+    $stream.Position = $reader.ReadInt32() + 4   # skip the "PE\0\0" signature
+    $machine = $reader.ReadUInt16()
+  } finally {
+    $stream.Dispose()
+  }
+
+  switch ($machine) {
+    0x8664  { "x64" }
+    0xAA64  { "arm64" }
+    0x014C  { "x86" }
+    default { "unknown" }
+  }
+}
+
 $iscc = Resolve-InnoCompiler $InnoCompiler
 if (-not $iscc) {
   throw "Inno Setup compiler not found. Install Inno Setup 6 or set -InnoCompiler / ISCC_EXE."
 }
+
+# Fail before staging anything if -Sign can't work.
+if ($Sign) { $SignTool = Assert-SignTool $SignTool }
 
 $version = (Select-String -Path (Join-Path $root "CMakeLists.txt") `
   -Pattern 'project\(Spindle VERSION ([0-9.]+)').Matches[0].Groups[1].Value
@@ -106,6 +144,7 @@ if (-not $exe) {
   throw "spindle.exe not found under $BuildDir. Run scripts/build.ps1 first."
 }
 $buildOutputDir = $exe.DirectoryName
+$arch = Get-PeArchitecture $exe.FullName
 
 $stage = Join-Path $distDir "Spindle"
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
@@ -113,11 +152,35 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Write-Host "==> Staging deployed build output from $buildOutputDir"
 Copy-DeployedBuildOutput $buildOutputDir $stage
 
+# Sign the staged copies, never the build tree, so a later rebuild can't ship a
+# stale signature.
+if ($Sign) {
+  Write-Host "==> Signing staged executables"
+  $binaries = @(Select-SignableFile (Get-ChildItem -LiteralPath $stage -Recurse -File -Filter "*.exe" |
+    Select-Object -ExpandProperty FullName))
+  Invoke-CodeSign -Path $binaries -SignTool $SignTool
+}
+
 $iss = Join-Path $distDir "spindle-inno.iss"
 $icon = Join-Path $root "resources\spindle.ico"
 $escapedStage = $stage.Replace("\", "\\")
 $escapedDist = $distDir.Replace("\", "\\")
 $escapedIcon = $icon.Replace("\", "\\")
+
+# Inno Setup signs both the installer and the uninstaller itself, through a
+# named sign tool passed on the ISCC command line as /S<name>=<command>. Quote
+# with Inno's $q escape so no literal double quotes have to survive PowerShell's
+# native-argument handling.
+$isccSignArgs = @()
+$signDirectives = ""
+if ($Sign) {
+  $signLine = Get-CodeSignCommandLine -FileToken '$f' -QuoteToken '$q' -SignTool $SignTool
+  $isccSignArgs = @("/Sspindle=$signLine")
+  $signDirectives = @"
+SignTool=spindle
+SignedUninstaller=yes
+"@
+}
 
 @"
 #define MyAppName "Spindle"
@@ -135,7 +198,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=$escapedDist
-OutputBaseFilename=Spindle-$version-windows-x64-inno-setup
+OutputBaseFilename=Spindle-$version-windows-$arch
 SetupIconFile=$escapedIcon
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesAllowed=x64compatible
@@ -144,6 +207,7 @@ PrivilegesRequired=admin
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+$signDirectives
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
@@ -165,11 +229,11 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 Write-Host "==> Building Inno Setup installer"
 try {
-  Invoke-Native $iscc @($iss)
+  Invoke-Native $iscc ($isccSignArgs + @($iss))
 } finally {
   if (Test-Path -LiteralPath $iss) {
     Remove-Item -LiteralPath $iss -Force
   }
 }
 
-Write-Host "==> Done. Installer: $(Join-Path $distDir "Spindle-$version-windows-x64-inno-setup.exe")"
+Write-Host "==> Done. Installer: $(Join-Path $distDir "Spindle-$version-windows-$arch.exe")"

@@ -256,11 +256,17 @@ cmake --build build --config Release
 （出力は `dist/`）:
 
 ```sh
-./scripts/package-macos.sh                       # → Spindle-<ver>-macOS.dmg
-./scripts/package-linux.sh                       # → AppImage + .deb / .tar.gz
-pwsh scripts/package-windows.ps1 -QtPrefix ...   # → 携帯版 .zip（NSIS があれば setup.exe）
-pwsh scripts/package-windows-inno.ps1 -QtPrefix ... # → Inno Setup setup.exe
+./scripts/package-macos.sh              # → .dmg
+./scripts/package-linux.sh              # → .AppImage + .deb / .tar.gz
+pwsh scripts/package-windows.ps1        # → 携帯版 .zip（NSIS があればインストーラ .exe）
+pwsh scripts/package-windows-inno.ps1   # → Inno Setup インストーラ .exe
 ```
+
+パッケージ名は `Spindle-<version>-<os>-<arch>.<ext>` に統一されています。
+Windows では `-Sign` を付けると、実行ファイル・インストーラ・アンインストーラに
+Authenticode 署名を付与します（証明書は `CODESIGN_CERT` に `.pfx` のパス、
+拇印、またはサブジェクト名で指定）。詳細は
+[`scripts/README.md`](scripts/README.md) を参照してください。
 
 各 deploy ツールが Qt WebEngine ランタイムを同梱し、アプリを自己完結化します。
 
@@ -280,7 +286,7 @@ pwsh scripts/package-windows-inno.ps1 -QtPrefix ... # → Inno Setup setup.exe
 
 - **Linux** → AppImage + `.deb` / `.tar.gz`
 - **macOS** → `.dmg`
-- **Windows** → 携帯版 `.zip` + NSIS / Inno Setup `setup.exe`
+- **Windows** → 携帯版 `.zip` + NSIS / Inno Setup インストーラ `.exe`
 
 各実行で成果物がアップロードされます。`v0.3.5` のようなタグを push すると、
 全パッケージを添付した GitHub Release も自動作成されます。

@@ -5,7 +5,7 @@
 # Point CMAKE_PREFIX_PATH at the Qt kit; otherwise build.sh auto-detects a
 # Homebrew Qt.
 #
-# Output: dist/Spindle-<version>-macos.dmg
+# Output: dist/Spindle-<version>-macos-<arch>.dmg
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -48,6 +48,19 @@ echo "==> Deploying Qt runtime into the bundle (incl. WebEngine helpers)"
 echo "==> Ad-hoc code signing"
 codesign --force --deep --sign - "$APP"
 
+# Name the package after the architecture the bundle was actually built for,
+# not the host's.
+ARCH="$(uname -m)"
+APP_BIN="$APP/Contents/MacOS/spindle"
+if command -v lipo >/dev/null 2>&1 && [ -f "$APP_BIN" ]; then
+  app_archs="$(lipo -archs "$APP_BIN" 2>/dev/null || true)"
+  case "$app_archs" in
+    "")    ;;                            # lipo failed — keep uname -m
+    *" "*) ARCH="universal" ;;           # fat binary
+    *)     ARCH="$app_archs" ;;
+  esac
+fi
+
 echo "==> Building DMG"
 mkdir -p "$DIST_DIR"
 STAGE="$BUILD_DIR/dmg-stage"
@@ -55,7 +68,7 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/Spindle.app"
 ln -s /Applications "$STAGE/Applications"
-DMG="$DIST_DIR/Spindle-$VERSION-macos.dmg"
+DMG="$DIST_DIR/Spindle-$VERSION-macos-$ARCH.dmg"
 rm -f "$DMG"
 hdiutil create -volname "Spindle" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 rm -rf "$STAGE"

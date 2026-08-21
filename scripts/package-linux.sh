@@ -8,7 +8,7 @@
 # are downloaded to scripts/.cache (set NO_DOWNLOAD=1 to disable, SKIP_APPIMAGE=1
 # to skip the AppImage entirely).
 #
-# Output: dist/
+# Output: dist/Spindle-<version>-linux-<arch>.{AppImage,deb,tar.gz}
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,15 +17,24 @@ DIST_DIR="$ROOT/dist"
 CACHE="$ROOT/scripts/.cache"
 VERSION="$(sed -n 's/.*project(Spindle VERSION \([0-9.]*\).*/\1/p' "$ROOT/CMakeLists.txt")"
 VERSION="${VERSION:-0.0.0}"
+ARCH="$(uname -m)"
 
 "$ROOT/scripts/build.sh"
 mkdir -p "$DIST_DIR"
 
 # ---- CPack: .deb (+ .tar.gz) ---------------------------------------------
+# CPack names its output its own way; rename to the common
+# Spindle-<version>-<os>-<arch>.<ext> scheme the other platforms use.
 echo "==> CPack (DEB/TGZ)"
 ( cd "$BUILD_DIR" && cpack -G "DEB;TGZ" ) || echo "   (CPack DEB skipped — dpkg tools missing?)"
-find "$BUILD_DIR" -maxdepth 1 \( -name 'Spindle-*.deb' -o -name 'Spindle-*.tar.gz' \) \
-  -exec mv -f {} "$DIST_DIR/" \; 2>/dev/null || true
+for pkg in "$BUILD_DIR"/Spindle-*.deb "$BUILD_DIR"/Spindle-*.tar.gz; do
+  [ -f "$pkg" ] || continue
+  case "$pkg" in
+    *.tar.gz) ext="tar.gz" ;;
+    *)        ext="deb" ;;
+  esac
+  mv -f "$pkg" "$DIST_DIR/Spindle-$VERSION-linux-$ARCH.$ext"
+done
 
 # ---- AppImage (self-contained) -------------------------------------------
 if [ "${SKIP_APPIMAGE:-0}" = "1" ]; then
@@ -99,7 +108,7 @@ WRAP
 fi
 
 echo "==> Building AppImage"
-( cd "$DIST_DIR" && OUTPUT="Spindle-$VERSION-x86_64.AppImage" \
+( cd "$DIST_DIR" && OUTPUT="Spindle-$VERSION-linux-$ARCH.AppImage" \
     "$LD" --appdir "$APPDIR" --plugin qt \
       --desktop-file "$APPDIR/usr/share/applications/spindle.desktop" \
       --icon-file "$APPDIR/usr/share/icons/hicolor/256x256/apps/spindle.png" \

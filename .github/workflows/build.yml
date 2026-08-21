@@ -114,7 +114,7 @@ jobs:
           name: spindle-windows
           path: |
             dist/*.zip
-            dist/*-setup.exe
+            dist/Spindle-*-windows-*.exe
           if-no-files-found: error
 
   # -------------------------------------------------------------- Release ---
