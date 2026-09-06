@@ -10,6 +10,8 @@ EPUB 内のリソースは独自 URL スキーム `epub://` 経由でエンジ�
 各章は著者が用意したスタイルシート・フォント・画像をそのまま読み込みます。
 Windows / macOS / Linux に対応します。
 
+![Spindle の画面：目次サイドバーと、原文と訳文を交互に並べた対訳ビュー（ダークテーマ）](images/screenshot1.png)
+
 ## 入手
 
 [Releases](https://github.com/fukuyori/Spindle/releases) から、ビルド済みの

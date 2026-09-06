@@ -10,6 +10,8 @@ rendered with full fidelity to its own CSS — including Japanese vertical writi
 through a custom `epub://` URL scheme, so chapters load their stylesheets,
 fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 
+![Spindle: the table-of-contents sidebar beside a book shown in the bilingual view, each paragraph followed by its translation (dark theme)](images/screenshot1.png)
+
 ## Get Spindle
 
 Prebuilt packages are published on the
