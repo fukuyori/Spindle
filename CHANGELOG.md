@@ -4,6 +4,52 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-09-06
+
+### Added
+- **Zoom for fixed-layout pages.** A−/A+ and Ctrl+mouse wheel now enlarge
+  pre-paginated pages. Page zoom never could: reader.js refits such a page to
+  the CSS viewport, which shrinks by exactly the zoom factor and cancels it
+  out. The page is now scaled by the app instead, and past fit-to-window it can
+  be dragged around.
+- **The spread is one sheet.** A fixed-layout spread is laid out as a single
+  canvas rather than two independently fitted halves: zooming scales both by
+  the same factor and panning moves both together, so the join at the spine
+  travels with the pages instead of being pinned to the middle of the window.
+  Each page turn starts fitted and centred again.
+- **Legibility adjustments for scanned pages**, in View ▸ Display Adjustments:
+  - **Darken text on image pages** — a levels curve anchored at white, so the
+    paper stays paper while the ink gains weight. (CSS `contrast()` pivots on
+    mid grey, which pushes the pale half-tones that give a character its body
+    up to white and leaves the strokes thinner, not clearer.)
+  - **Sharpen edges on image pages** — an unsharp mask whose radius follows the
+    display scale, so it lands at the same size on screen at any zoom.
+  - **Even out density page by page** — measures each page's paper and ink and
+    maps them onto shared targets, so a scan whose pages vary in density reads
+    evenly. Applies to fixed-layout pages and single-image chapters only;
+    ordinary chapters render real text and are left alone.
+- **`-Sign` for the Windows packagers.** `package-windows.ps1` and
+  `package-windows-inno.ps1` apply an Authenticode signature to the
+  executable, the installer and the uninstaller. The identity comes from
+  `CODESIGN_CERT` (a .pfx path, a SHA1 thumbprint or a subject name);
+  third-party binaries keep the signatures they arrived with.
+
+### Changed
+- **Package filenames are uniform** across platforms:
+  `Spindle-<version>-<os>-<arch>.<ext>`, with the architecture read from the
+  binary that was actually built rather than from the host.
+- **View ▸ Adjust Brightness… is now View ▸ Display Adjustments…**, since it
+  covers more than brightness.
+
+### Fixed
+- **A page of a spread could come back cut in half** after the spread was
+  switched off and on again. The page's own size was measured from the DOM
+  before its image had dimensions, and the view was then sized to that
+  measurement; a size taken that early is now never used.
+
+### Removed
+- **NSIS packaging.** The Windows installer is built with Inno Setup only.
+
 ## [0.7.3] - 2026-07-29
 
 ### Removed

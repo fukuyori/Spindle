@@ -40,6 +40,13 @@ public:
     {
         emit pageWritingModeDetectionRequested(vertical);
     }
+    // A pre-paginated page reporting its own coordinate space, so C++ can size
+    // the view to it and lay the spread out as one canvas. Both halves share
+    // this bridge, so the page says which one it is.
+    Q_INVOKABLE void fixedPageMeasured(bool companion, double width, double height)
+    {
+        emit fixedPageMeasurementReported(companion, width, height);
+    }
 
     // Called from C++ to drive the page.
     void applyTranslation(int index, const QString &text, const QString &state)
@@ -57,6 +64,7 @@ signals:
     void blocksReady(const QString &json);
     void fixedPageEdgeClickRequested(int edge);
     void pageWritingModeDetectionRequested(bool vertical);
+    void fixedPageMeasurementReported(bool companion, double width, double height);
     void translationReady(int index, const QString &text, const QString &state);
     void scrollToHighlight(const QString &id);
 

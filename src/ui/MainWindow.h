@@ -13,7 +13,9 @@
 #include <QMainWindow>
 #include <QPair>
 #include <QPoint>
+#include <QPointF>
 #include <QSet>
+#include <QSizeF>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -172,12 +174,28 @@ private:
     int pageTurnStep() const;
     bool canPairChapters(int first) const;
     int spreadStartFor(int chapter) const;
-    void applyFixedAlign(QWebEngineView *view, const QString &align);
     void ensureFixedFit(QWebEngineView *view);
+    // --- fixed-layout canvas -------------------------------------------------
+    // A pre-paginated chapter is not laid out by m_readerLayout. Its one or two
+    // views are sized to the scaled page and positioned by hand inside
+    // m_readerContainer, which clips them, so zoom and pan move the whole
+    // spread as a single sheet instead of scrolling each page on its own.
+    void onFixedPageMeasured(bool companion, double width, double height);
+    void layoutFixedCanvas();
+    void setFixedCanvasActive(bool active);
+    void resetFixedCanvas();
+    bool fixedCanvasPannable() const;
+    QHash<QWebEngineView *, QSizeF> m_fixedNatural; // page coordinate space
+    bool m_fixedCanvas = false;
+    double m_fixedCanvasZoom = 1.0;
+    QPointF m_fixedCanvasPan;   // offset from the centred position, in pixels
+    QSizeF m_fixedCanvasSize;   // laid-out size of the whole spread
+    bool m_fixedPanDragging = false;
+    QPoint m_fixedPanDragOrigin;
+    QPointF m_fixedPanDragStart;
     // Last-applied injected-script state, kept to avoid rewriting the script
-    // collections during navigation (see updateThemeScript/applyFixedAlign).
+    // collections during navigation (see updateThemeScript).
     QString m_lastThemeScriptCss;
-    QHash<QWebEngineView *, QString> m_appliedFixedAlign;
     void updateFixedSpread();
     void requestPageTurn(int direction);
     void updatePlaceholderBackground(); // keep the placeholder themed while shown
@@ -295,6 +313,14 @@ private:
     int m_fontSize = 100; // percent (zoom)
     Theme m_theme = Theme::Light;
     BrightnessAdjust m_brightness[3];
+    // Scanned-page legibility, 0 (off) to 100 each. Not per-theme: they
+    // compensate for how the scan was made, not for the reading light.
+    int m_pageContrast = 0; // levels curve — pulls the ink down, paper stays
+    int m_pageSharpen = 0;  // unsharp mask — tightens smeared strokes
+    // Measure each page and map its own paper and ink onto shared targets, so
+    // pages scanned at different densities read alike. Composes with the two
+    // manual strengths above rather than replacing them.
+    bool m_pageAutoLevels = false;
     bool m_xmlView = false; // show raw chapter source instead of rendered view
     QString m_fontFamily;   // body font override ("" = use the book's own fonts)
     QString m_fontChoice;   // last font picked in 表示 > フォント… (persisted)

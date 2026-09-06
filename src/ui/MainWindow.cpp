@@ -20,6 +20,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QCursor>
@@ -589,7 +590,7 @@ void MainWindow::showAboutDialog()
 void MainWindow::openAppearanceDialog()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("表示の明るさ"));
+    dialog.setWindowTitle(tr("表示調整"));
     QFormLayout *form = new QFormLayout(&dialog);
 
     QComboBox *themeBox = new QComboBox(&dialog);
@@ -627,6 +628,38 @@ void MainWindow::openAppearanceDialog()
     form->addRow(tr("原文"), makeSlider(&originalSlider, &originalLabel));
     form->addRow(tr("翻訳文"), makeSlider(&translationSlider, &translationLabel));
 
+    // Not per-theme, so it is not part of loadSliders/saveSliders below.
+    QSlider *contrastSlider = nullptr;
+    QLabel *contrastLabel = nullptr;
+    QWidget *contrastRow = makeSlider(&contrastSlider, &contrastLabel);
+    contrastSlider->setRange(0, 100);
+    contrastSlider->setValue(m_pageContrast);
+    contrastLabel->setText(QString::number(m_pageContrast));
+    form->addRow(tr("画像ページの文字を濃く"), contrastRow);
+
+    QSlider *sharpenSlider = nullptr;
+    QLabel *sharpenLabel = nullptr;
+    QWidget *sharpenRow = makeSlider(&sharpenSlider, &sharpenLabel);
+    sharpenSlider->setRange(0, 100);
+    sharpenSlider->setValue(m_pageSharpen);
+    sharpenLabel->setText(QString::number(m_pageSharpen));
+    form->addRow(tr("画像ページの輪郭を強調"), sharpenRow);
+
+    QCheckBox *autoLevelsBox = new QCheckBox(tr("ページごとに濃さを自動で揃える"), &dialog);
+    autoLevelsBox->setChecked(m_pageAutoLevels);
+    form->addRow(QString(), autoLevelsBox);
+
+    QLabel *pageHint = new QLabel(
+        tr("スキャン画像の固定レイアウトページと画像チャプターに効きます。"
+           "「濃く」は白地を保ったまま文字を沈め、「輪郭」はにじんだ字画を締めます。"
+           "「自動で揃える」はページごとに地と文字の濃さを測って基準に合わせるので、"
+           "ページによって濃さがばらつくスキャンが読みやすくなります"
+           "（その上に「濃く」を重ねられます）。"
+           "強くするとノイズも目立ちます。テーマ共通の設定です。"),
+        &dialog);
+    pageHint->setWordWrap(true);
+    form->addRow(QString(), pageHint);
+
     auto updateLabels = [=] {
         backgroundLabel->setText(QString::number(backgroundSlider->value()));
         originalLabel->setText(QString::number(originalSlider->value()));
@@ -659,6 +692,9 @@ void MainWindow::openAppearanceDialog()
             settings.setValue(prefix + QStringLiteral("translationBrightness"),
                               m_brightness[t].translation);
         }
+        settings.setValue(QStringLiteral("appearance/pageContrast"), m_pageContrast);
+        settings.setValue(QStringLiteral("appearance/pageSharpen"), m_pageSharpen);
+        settings.setValue(QStringLiteral("appearance/pageAutoLevels"), m_pageAutoLevels);
     };
     connect(persistTimer, &QTimer::timeout, this, persistAll);
 
@@ -684,6 +720,23 @@ void MainWindow::openAppearanceDialog()
             saveSliders();
         });
     }
+    connect(contrastSlider, &QSlider::valueChanged, this, [=](int value) {
+        contrastLabel->setText(QString::number(value));
+        m_pageContrast = value;
+        persistTimer->start();
+        injectViewStyle();
+    });
+    connect(sharpenSlider, &QSlider::valueChanged, this, [=](int value) {
+        sharpenLabel->setText(QString::number(value));
+        m_pageSharpen = value;
+        persistTimer->start();
+        injectViewStyle();
+    });
+    connect(autoLevelsBox, &QCheckBox::toggled, this, [=](bool on) {
+        m_pageAutoLevels = on;
+        persistTimer->start();
+        injectViewStyle();
+    });
     loadSliders(static_cast<int>(m_theme));
 
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
@@ -785,7 +838,7 @@ void MainWindow::buildUi()
         connect(act, &QAction::triggered, this, [this, i] { setTheme(i); });
         m_themeActs[i] = act;
     }
-    viewMenu->addAction(tr("明るさ調整…"), this, &MainWindow::openAppearanceDialog);
+    viewMenu->addAction(tr("表示調整…"), this, &MainWindow::openAppearanceDialog);
     // UI language: applied at startup (main.cpp installs the matching
     // translator), so switching here only persists the choice.
     QMenu *langMenu = viewMenu->addMenu(tr("言語 / Language"));
@@ -1194,6 +1247,13 @@ void MainWindow::ensureWebView()
     }
 
     m_readerContainer = new QWidget(this);
+    // A fixed-layout canvas is bigger than the container when zoomed in; the
+    // container is what clips it. It also has to be painted, because a page
+    // narrower than the area leaves its own background showing at the sides.
+    m_readerContainer->setAutoFillBackground(true);
+    // Resizes reach eventFilter, which re-fits the canvas (the canvas is not
+    // managed by m_readerLayout).
+    m_readerContainer->installEventFilter(this);
     m_readerLayout = new QHBoxLayout(m_readerContainer);
     m_readerLayout->setContentsMargins(0, 0, 0, 0);
     // No seam between the two views: a fixed-layout spread must join at the
@@ -1255,8 +1315,9 @@ void MainWindow::ensureWebView()
     m_spreadView->page()->scripts().insert(companionMarker);
     installReaderScript(m_spreadView);
     connect(m_spreadView, &QWebEngineView::loadFinished, this, [this](bool ok) {
-        if (ok)
-            ensureFixedFit(m_spreadView);
+        if (!ok)
+            return;
+        ensureFixedFit(m_spreadView);
     });
     m_spreadView->hide();
 
@@ -1371,6 +1432,8 @@ void MainWindow::setupWebChannel()
     connect(m_bridge, &Bridge::fixedPageEdgeClickRequested, this, [this](int edge) {
         requestPageTurn(rightBinding() ? -edge : edge);
     });
+    connect(m_bridge, &Bridge::fixedPageMeasurementReported, this,
+            &MainWindow::onFixedPageMeasured);
     connect(m_bridge, &Bridge::pageWritingModeDetectionRequested, this,
             [this](bool vertical) {
                 if (m_currentPageVerticalWriting == vertical)
@@ -1449,6 +1512,12 @@ void MainWindow::restoreViewSettings()
             qBound(-50, settings.value(prefix + QStringLiteral("translationBrightness"), 0).toInt(),
                    50);
     }
+    m_pageContrast =
+        qBound(0, settings.value(QStringLiteral("appearance/pageContrast"), 0).toInt(), 100);
+    m_pageSharpen =
+        qBound(0, settings.value(QStringLiteral("appearance/pageSharpen"), 0).toInt(), 100);
+    m_pageAutoLevels =
+        settings.value(QStringLiteral("appearance/pageAutoLevels"), false).toBool();
     m_translateView = static_cast<TranslateView>(
         qBound(0, settings.value(QStringLiteral("translate/view"), 0).toInt(), 2));
     m_wrapMode = static_cast<WrapMode>(
@@ -1658,6 +1727,7 @@ bool MainWindow::openEpub(const QString &filePath)
     m_book = std::move(book);
     m_epubPath = filePath;
     m_currentPageVerticalWriting = false;
+    resetFixedCanvas(); // page sizes belong to the book that is being replaced
     loadBindingMode();
     ensureWebView(); // displayChapter below needs the (lazily created) view
     if (m_spreadAction)
@@ -1740,6 +1810,11 @@ void MainWindow::displayChapter(int index, const QString &fragment)
 
     m_currentChapter = index;
     m_currentPageVerticalWriting = false;
+    // Every newly opened page starts fitted and centred: a zoom carried over
+    // from the previous page would land on a page of a different size.
+    m_fixedCanvasZoom = 1.0;
+    m_fixedCanvasPan = QPointF();
+    m_fixedPanDragging = false;
     stopSpeech(); // reading aloud does not survive navigation / reloads
     const Chapter &chapter = m_book->chapters().at(index);
     saveRecentChapter(m_epubPath, index, chapter.label);
@@ -1906,8 +1981,8 @@ QString MainWindow::viewStyleCss() const
         "width:100% !important;height:100% !important;overflow:auto !important;}"
         " html.spindle-image-chapter body{margin:0 !important;width:100% !important;"
         "min-height:100% !important;overflow:visible !important;}"
-        " html.spindle-image-chapter body>*:not(#__spindle_image_stage){"
-        "display:none !important;}"
+        " html.spindle-image-chapter body>*:not(#__spindle_image_stage)"
+        ":not(#__spindle_enhance){display:none !important;}"
         " #__spindle_image_stage{"
         "box-sizing:border-box !important;display:flex !important;"
         "align-items:center !important;justify-content:center !important;"
@@ -1929,6 +2004,40 @@ QString MainWindow::viewStyleCss() const
         "html.spindle-image-pannable #__spindle_image_stage{cursor:grab !important;}"
         " html.spindle-image-panning body,"
         "html.spindle-image-panning #__spindle_image_stage{cursor:grabbing !important;}");
+
+    // Scanned pages carry their text as grey strokes on an off-white ground,
+    // and what makes them read clearly is weight, not separation. CSS
+    // contrast() is the wrong tool: it pivots on mid grey, so the pale
+    // half-tones that give a character its body are pushed up to white and the
+    // strokes come out thinner and fainter. What is wanted is a levels curve
+    // anchored at white — paper stays paper while every darker tone is pulled
+    // down — which only exists as an SVG filter. reader.js builds it from the
+    // slope below and adds .spindle-page-levels once it is in the document, so
+    // the rule can never reference a filter that is not there yet.
+    //
+    // Only the picture-like pages get it: a pre-paginated page and a chapter
+    // that is one full-page image. Ordinary chapters render real text, which is
+    // already crisp and would only be crushed.
+    if (m_pageContrast > 0 || m_pageSharpen > 0 || m_pageAutoLevels) {
+        css += QStringLiteral(" html{--spindle-page-levels:%1;--spindle-page-sharpen:%2;"
+                              "--spindle-page-autolevels:%3;}"
+                              " html.spindle-page-enhance.spindle-fixed-layout-page body,"
+                              "html.spindle-page-enhance.spindle-image-chapter body{"
+                              "filter:url(#__spindle_enhance_filter) !important;}")
+                   .arg(QString::number(1.0 + m_pageContrast / 100.0, 'f', 2),
+                        QString::number(m_pageSharpen / 100.0, 'f', 2),
+                        QString::number(m_pageAutoLevels ? 1 : 0));
+    }
+
+    // A zoomed-in fixed-layout page scrolls, but its scrollbars would sit right
+    // on the spine of a spread and break the "pages touch" join the two views
+    // are laid out for. Drag panning (and the wheel) reach the same overflow,
+    // so hide them. Both properties: scrollbar-width is the standard one, the
+    // ::-webkit-scrollbar rule covers the engine's own pseudo-element.
+    css += QStringLiteral(
+        " html.spindle-fixed-layout-page{scrollbar-width:none !important;}"
+        " html.spindle-fixed-layout-page::-webkit-scrollbar{"
+        "width:0 !important;height:0 !important;display:none !important;}");
 
     // Optional font override: force the chosen family over the book's own fonts.
     // Skipped in the raw-XHTML source view (which wants its monospace styling).
@@ -2004,14 +2113,26 @@ void MainWindow::injectViewStyle()
     pal.setColor(QPalette::Base, bgColor);
     m_view->setPalette(pal);
     m_view->setAutoFillBackground(true);
+    if (m_readerContainer) {
+        // Shows around a fixed-layout page that does not fill the area.
+        QPalette containerPal = m_readerContainer->palette();
+        containerPal.setColor(QPalette::Window, bgColor);
+        m_readerContainer->setPalette(containerPal);
+    }
 
     const QString css = viewStyleCss();
     // Primary path: the scheme handler embeds this CSS into every served
     // chapter document, so pages arrive already styled — no script timing.
     EpubSchemeHandler::instance()->setThemeCss(m_schemeId, css);
     updateThemeScript(css); // backup + XML source view (setHtml, not served)
+    // The SVG filter the scanned-page levels rule points at is built by the
+    // page from the CSS variable above, so it has to be rebuilt whenever that
+    // variable changes (a slider drag reaches the page through this path).
+    const QString levelsJs = QStringLiteral(
+        "window.__spindleRefreshPageEnhance && window.__spindleRefreshPageEnhance();");
     m_view->page()->runJavaScript(themeStyleJs(css),
                                   QWebEngineScript::ApplicationWorld); // current page
+    m_view->page()->runJavaScript(levelsJs, QWebEngineScript::ApplicationWorld);
     if (m_spreadView) {
         m_spreadView->page()->setBackgroundColor(bgColor);
         QPalette spreadPalette = m_spreadView->palette();
@@ -2021,6 +2142,7 @@ void MainWindow::injectViewStyle()
         m_spreadView->setAutoFillBackground(true);
         m_spreadView->page()->runJavaScript(themeStyleJs(css),
                                             QWebEngineScript::ApplicationWorld);
+        m_spreadView->page()->runJavaScript(levelsJs, QWebEngineScript::ApplicationWorld);
     }
 }
 
@@ -2208,38 +2330,6 @@ int MainWindow::spreadStartFor(int chapter) const
     return chapter;
 }
 
-void MainWindow::applyFixedAlign(QWebEngineView *view, const QString &align)
-{
-    if (!view)
-        return;
-    // Same rationale as updateThemeScript: page turns call this constantly
-    // with an unchanged value while loads are in flight — leave the script
-    // collection alone unless the alignment actually changed.
-    if (m_appliedFixedAlign.value(view) == align)
-        return;
-    m_appliedFixedAlign.insert(view, align);
-    QWebEngineScriptCollection &scripts = view->page()->scripts();
-    const QList<QWebEngineScript> existing =
-        scripts.find(QStringLiteral("spindle-fixed-align"));
-    for (const QWebEngineScript &s : existing)
-        scripts.remove(s);
-    QWebEngineScript s;
-    s.setName(QStringLiteral("spindle-fixed-align"));
-    s.setSourceCode(
-        QStringLiteral("window.__spindleFixedAlign = '%1';").arg(align));
-    s.setInjectionPoint(QWebEngineScript::DocumentCreation);
-    s.setWorldId(QWebEngineScript::ApplicationWorld);
-    s.setRunsOnSubFrames(false);
-    scripts.insert(s);
-    // Also reflect it into the page that is already loaded (binding/spread
-    // toggles must not require a navigation to take effect).
-    view->page()->runJavaScript(
-        QStringLiteral(
-            "window.__spindleSetFixedAlign && window.__spindleSetFixedAlign('%1');")
-            .arg(align),
-        QWebEngineScript::ApplicationWorld);
-}
-
 // Post-load safety net for fixed-layout pages. QtWebEngine can occasionally
 // skip DocumentReady script injection when navigations come in quick
 // succession; the page then shows at natural size with scrollbars. Ask the
@@ -2261,6 +2351,155 @@ void MainWindow::ensureFixedFit(QWebEngineView *view)
         });
 }
 
+// --- fixed-layout canvas -----------------------------------------------------
+// A pre-paginated chapter is taken out of m_readerLayout: its one or two views
+// are sized to the scaled page and positioned by hand inside m_readerContainer,
+// which clips whatever hangs over. The spread is then a single sheet — zooming
+// resizes both halves by the same factor and panning moves both by the same
+// offset, so the join at the spine travels with the pages instead of being
+// pinned to the middle of the window. Nothing scrolls inside the pages: each
+// one always fills its own view exactly (see layoutFixedPage in reader.js).
+
+// The page telling us its own coordinate space. Until this arrives for a view
+// there is nothing to size it to, so the chapter stays in the ordinary layout.
+void MainWindow::onFixedPageMeasured(bool companion, double width, double height)
+{
+    QWebEngineView *view = companion ? m_spreadView : m_view;
+    if (!view || !(width > 0) || !(height > 0))
+        return;
+    const QSizeF size(width, height);
+    if (m_fixedNatural.value(view) == size)
+        return;
+    m_fixedNatural.insert(view, size);
+    layoutFixedCanvas();
+}
+
+void MainWindow::resetFixedCanvas()
+{
+    m_fixedNatural.clear();
+    m_fixedCanvasZoom = 1.0;
+    m_fixedCanvasPan = QPointF();
+    m_fixedCanvasSize = QSizeF();
+    m_fixedPanDragging = false;
+    setFixedCanvasActive(false);
+}
+
+// Hand the two views back and forth between m_readerLayout and manual
+// geometry. They stay children of the container either way, so no reparenting
+// (and no render-surface churn) happens here.
+void MainWindow::setFixedCanvasActive(bool active)
+{
+    if (m_fixedCanvas == active || !m_readerLayout || !m_view)
+        return;
+    m_fixedCanvas = active;
+    if (active) {
+        m_readerLayout->removeWidget(m_view);
+        if (m_spreadView)
+            m_readerLayout->removeWidget(m_spreadView);
+    } else {
+        m_readerLayout->addWidget(m_view, 1);
+        if (m_spreadView)
+            m_readerLayout->addWidget(m_spreadView, 1);
+    }
+}
+
+bool MainWindow::fixedCanvasPannable() const
+{
+    if (!m_fixedCanvas || !m_readerContainer)
+        return false;
+    return m_fixedCanvasSize.width() > m_readerContainer->width() + 0.5
+           || m_fixedCanvasSize.height() > m_readerContainer->height() + 0.5;
+}
+
+void MainWindow::layoutFixedCanvas()
+{
+    if (!m_view || !m_readerContainer)
+        return;
+    const QSizeF primary = m_fixedNatural.value(m_view);
+    if (!currentChapterFixedLayout() || m_xmlView || primary.isEmpty()) {
+        setFixedCanvasActive(false);
+        return;
+    }
+    const bool companionShown = m_spreadView && m_spreadView->isVisible();
+    QSizeF secondary = companionShown ? m_fixedNatural.value(m_spreadView) : QSizeF();
+    // A companion that has never reported (first ever spread in this book)
+    // borrows the primary's page size. The two halves of a spread are the same
+    // size in every real book, and standing in for it is far better than
+    // leaving the companion at whatever geometry it happened to have.
+    if (companionShown && secondary.isEmpty())
+        secondary = primary;
+
+    setFixedCanvasActive(true);
+
+    const double areaW = qMax(1, m_readerContainer->width());
+    const double areaH = qMax(1, m_readerContainer->height());
+    // Fit-to-view is measured against the half each page occupies at rest, so
+    // zoom 1 reproduces the plain spread: two fitted pages meeting in the
+    // middle. A lone page is fitted against the whole area.
+    const double slotW = companionShown ? areaW / 2.0 : areaW;
+    auto scaleFor = [&](const QSizeF &page) {
+        return qMin(slotW / page.width(), areaH / page.height()) * m_fixedCanvasZoom;
+    };
+    const double primaryScale = scaleFor(primary);
+    const QSizeF primarySize(primary.width() * primaryScale,
+                             primary.height() * primaryScale);
+    // Zero, not a default QSizeF: that one is (-1, -1), which would quietly
+    // shrink the sheet and shift the origin when there is no companion.
+    QSizeF secondarySize(0, 0);
+    if (companionShown) {
+        const double s = scaleFor(secondary);
+        secondarySize = QSizeF(secondary.width() * s, secondary.height() * s);
+    }
+
+    m_fixedCanvasSize =
+        QSizeF(primarySize.width() + secondarySize.width(),
+               qMax(primarySize.height(), secondarySize.height()));
+
+    // Clamp the pan so the sheet can never be dragged clear of the window: an
+    // axis smaller than the area stays centred and does not pan at all.
+    auto clampPan = [](double pan, double sheet, double area) {
+        if (sheet <= area)
+            return 0.0;
+        const double limit = (sheet - area) / 2.0;
+        return qBound(-limit, pan, limit);
+    };
+    m_fixedCanvasPan.setX(
+        clampPan(m_fixedCanvasPan.x(), m_fixedCanvasSize.width(), areaW));
+    m_fixedCanvasPan.setY(
+        clampPan(m_fixedCanvasPan.y(), m_fixedCanvasSize.height(), areaH));
+
+    const double originX = (areaW - m_fixedCanvasSize.width()) / 2.0 + m_fixedCanvasPan.x();
+    const double originY = (areaH - m_fixedCanvasSize.height()) / 2.0 + m_fixedCanvasPan.y();
+
+    // Right-bound books read right to left, so the chapter being read is the
+    // right-hand page and its companion (the next chapter) sits on the left.
+    QWebEngineView *leftView = m_view;
+    QSizeF leftSize = primarySize;
+    QWebEngineView *rightView = m_spreadView;
+    QSizeF rightSize = secondarySize;
+    if (companionShown && rightBinding()) {
+        leftView = m_spreadView;
+        leftSize = secondarySize;
+        rightView = m_view;
+        rightSize = primarySize;
+    }
+
+    auto place = [&](QWebEngineView *view, const QSizeF &size, double x) {
+        if (!view)
+            return;
+        // Pages of unequal height hang from a shared centre line.
+        const double y = originY + (m_fixedCanvasSize.height() - size.height()) / 2.0;
+        view->setGeometry(QRect(QPoint(qRound(x), qRound(y)),
+                                QSize(qRound(size.width()), qRound(size.height()))));
+    };
+    place(leftView, leftSize, originX);
+    if (companionShown)
+        place(rightView, rightSize, originX + leftSize.width());
+
+    m_readerContainer->setCursor(fixedCanvasPannable() ? Qt::OpenHandCursor
+                                                       : Qt::ArrowCursor);
+}
+
 void MainWindow::updateFixedSpread()
 {
     if (!m_spreadView || !m_readerLayout) {
@@ -2271,26 +2510,30 @@ void MainWindow::updateFixedSpread()
                                && spreadStartFor(m_currentChapter) == m_currentChapter
                                && canPairChapters(m_currentChapter);
 
+    // Only used for reflowable chapters now; a fixed-layout spread is placed
+    // by layoutFixedCanvas, which reads the binding itself.
     m_readerLayout->setDirection(
         rightBinding() ? QBoxLayout::RightToLeft : QBoxLayout::LeftToRight);
 
-    // Join the spread at the spine: each page hugs its inner edge instead of
-    // centering in its own half. Single-page display stays centered.
-    applyFixedAlign(m_view,
-                    showCompanion ? (rightBinding() ? QStringLiteral("left")
-                                                    : QStringLiteral("right"))
-                                  : QStringLiteral("center"));
-    applyFixedAlign(m_spreadView, rightBinding() ? QStringLiteral("right")
-                                                 : QStringLiteral("left"));
-
+    const bool wasShown = m_spreadView->isVisible();
     m_spreadView->setVisible(showCompanion);
-    if (!showCompanion)
+    if (!showCompanion) {
+        // The sheet just lost half its width; re-centre what is left. The
+        // companion's page size is deliberately kept: turning the spread back
+        // on must be able to lay both halves out at once, rather than wait for
+        // a fresh measurement and show the companion at a stale size until it
+        // arrives.
+        if (wasShown)
+            m_fixedCanvasPan = QPointF();
+        layoutFixedCanvas();
         return;
+    }
 
     const Chapter &next = m_book->chapters().at(m_currentChapter + 1);
     m_spreadView->setZoomFactor(m_fontSize / 100.0);
     m_spreadView->setUrl(
         QUrl(EpubSchemeHandler::urlFor(m_schemeId, next.path)));
+    layoutFixedCanvas();
 }
 
 void MainWindow::requestPageTurn(int direction)
@@ -2330,6 +2573,21 @@ void MainWindow::adjustZoom(int deltaPercent)
 {
     if (!m_view)
         return;
+
+    // A pre-paginated chapter is a canvas of fixed size that C++ owns: page
+    // zoom cannot enlarge it (reader.js refits the page to the CSS viewport,
+    // which shrinks by exactly the zoom factor and cancels it out), so scale
+    // the canvas instead. The pan scales with it, keeping whatever the reader
+    // was looking at in the middle of the window.
+    if (m_fixedCanvas) {
+        const double next = qBound(0.5, m_fixedCanvasZoom + deltaPercent / 100.0, 4.0);
+        if (qFuzzyCompare(next, m_fixedCanvasZoom))
+            return;
+        m_fixedCanvasPan *= next / m_fixedCanvasZoom;
+        m_fixedCanvasZoom = next;
+        layoutFixedCanvas();
+        return;
+    }
 
     // Image-only chapters own a separate zoom value which starts at
     // fit-to-window for every newly opened page. Ask reader.js to consume the
@@ -4367,8 +4625,10 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         }
         return false;
     };
-    const bool readerEvent =
-        belongsToReader(m_view) || belongsToReader(m_spreadView);
+    // The container counts too: a zoomed-out fixed-layout page leaves bare
+    // container around it, and a press there should still pan or turn the page.
+    const bool readerEvent = belongsToReader(m_view) || belongsToReader(m_spreadView)
+                             || obj == m_readerContainer;
 
     switch (event->type()) {
     case QEvent::ChildAdded:
@@ -4433,9 +4693,27 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
                 m_pageTurnPressPosition = global;
                 return true;
             }
+            // Away from the page-turn edges, a drag pans the whole canvas.
+            // Handled here rather than in the page so that both halves of a
+            // spread move as one — they are separate documents and neither can
+            // see the other (see layoutFixedCanvas).
+            if (fixedCanvasPannable()) {
+                m_fixedPanDragging = true;
+                m_fixedPanDragOrigin = global;
+                m_fixedPanDragStart = m_fixedCanvasPan;
+                m_readerContainer->setCursor(Qt::ClosedHandCursor);
+                return true;
+            }
         }
         break;
     case QEvent::MouseMove:
+        if (m_fixedPanDragging) {
+            auto *me = static_cast<QMouseEvent *>(event);
+            const QPoint delta = me->globalPosition().toPoint() - m_fixedPanDragOrigin;
+            m_fixedCanvasPan = m_fixedPanDragStart + QPointF(delta);
+            layoutFixedCanvas();
+            return true;
+        }
         if (m_pageTurnPressCaptured) {
             auto *me = static_cast<QMouseEvent *>(event);
             if ((me->globalPosition().toPoint() - m_pageTurnPressPosition).manhattanLength()
@@ -4446,6 +4724,14 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         }
         break;
     case QEvent::MouseButtonRelease:
+        if (m_fixedPanDragging) {
+            m_fixedPanDragging = false;
+            if (m_readerContainer)
+                m_readerContainer->setCursor(fixedCanvasPannable()
+                                                 ? Qt::OpenHandCursor
+                                                 : Qt::ArrowCursor);
+            return true;
+        }
         if (m_pageTurnPressCaptured) {
             const int direction = m_pageTurnPressDirection;
             m_pageTurnPressCaptured = false;
@@ -4454,6 +4740,12 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
                 requestPageTurn(direction);
             return true;
         }
+        break;
+    case QEvent::Resize:
+        // The reader area changed size: the canvas is not laid out by
+        // m_readerLayout, so it has to be re-fitted by hand.
+        if (obj == m_readerContainer && m_fixedCanvas)
+            layoutFixedCanvas();
         break;
     case QEvent::Wheel:
         // Ctrl+wheel over the render widget would otherwise reach Chromium's

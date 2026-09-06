@@ -514,19 +514,275 @@
   // by meta viewport). Scale the whole body into the available WebEngine view
   // so the page never leaves horizontal overflow for Chromium to consume.
   // This also preserves image/text-overlay alignment in fixed-layout books.
+  //
+  // Placement, zoom and panning are NOT decided here: C++ sizes this view to
+  // the page's scaled size and moves the two views of a spread together as one
+  // canvas (MainWindow::layoutFixedCanvas). All this side does is fit the page
+  // to whatever viewport it is given, and report the page's own size so C++ can
+  // work out that scaled size.
   var fixedLayoutView = null;
   var fixedLayoutImage = null;
+  var reportedFixedSize = null;
+  // Only a page size that actually describes the page is handed to C++, which
+  // sizes the view to it. Everything else (a box measured before the images
+  // had dimensions, or a page with no intrinsic size at all) stays here: the
+  // view then keeps filling its half and the page fits itself into it.
+  var fixedSizeTrusted = false;
 
-  // Horizontal placement of the fitted page inside this view. In spread mode
-  // C++ sets "left"/"right" so the two pages meet at the spine; single-page
-  // display stays "center". Injected pre-load as window.__spindleFixedAlign
-  // and updated live through window.__spindleSetFixedAlign below.
-  var fixedAlign = (window.__spindleFixedAlign === "left"
-                    || window.__spindleFixedAlign === "right")
-                     ? window.__spindleFixedAlign : "center";
-  window.__spindleSetFixedAlign = function (align) {
-    fixedAlign = (align === "left" || align === "right") ? align : "center";
-    if (fixedLayoutView) layoutFixedPage();
+  function reportFixedSize() {
+    if (!fixedLayoutView || !fixedSizeTrusted) return;
+    if (!window.spindle || !window.spindle.fixedPageMeasured) return;
+    if (reportedFixedSize
+        && Math.abs(reportedFixedSize.width - fixedLayoutView.width) < 0.5
+        && Math.abs(reportedFixedSize.height - fixedLayoutView.height) < 0.5)
+      return;
+    reportedFixedSize = { width: fixedLayoutView.width, height: fixedLayoutView.height };
+    window.spindle.fixedPageMeasured(!!window.__spindleCompanion,
+                                     fixedLayoutView.width, fixedLayoutView.height);
+  }
+
+  // --- scanned-page levels --------------------------------------------------
+  // Makes the text on a scanned page read as heavier rather than merely more
+  // separated. The curve is out = slope*in + (1 - slope): white maps to white,
+  // so the paper is untouched, while every darker tone is pulled down and the
+  // pale half-tones around each stroke gain weight. C++ hands the slope over as
+  // the --spindle-page-levels custom property and keys the filter rule on the
+  // class added at the end, so the rule never points at a missing filter.
+  var ENHANCE_HOST_ID = "__spindle_enhance";
+  var ENHANCE_FILTER_ID = "__spindle_enhance_filter";
+  // Unsharp radius in *displayed* pixels. The filter runs in the page's own
+  // coordinate space, before the fit/zoom scale is applied, so the radius is
+  // divided by that scale to land at this size on screen.
+  var SHARPEN_RADIUS = 0.7;
+  var pageDisplayScale = 1;
+
+  function buildEnhanceFilter() {
+    var svgNs = "http://www.w3.org/2000/svg";
+    var host = document.createElementNS(svgNs, "svg");
+    host.setAttribute("id", ENHANCE_HOST_ID);
+    host.setAttribute("width", "0");
+    host.setAttribute("height", "0");
+    host.setAttribute("aria-hidden", "true");
+    host.style.setProperty("position", "absolute", "important");
+    var filter = document.createElementNS(svgNs, "filter");
+    filter.setAttribute("id", ENHANCE_FILTER_ID);
+    // Not the linearRGB default: both stages are meant to act on the tones as
+    // the reader sees them, the space their strengths were chosen in.
+    filter.setAttribute("color-interpolation-filters", "sRGB");
+
+    var names = ["feFuncR", "feFuncG", "feFuncB"];
+    function transferStage(type, resultName) {
+      var stage = document.createElementNS(svgNs, "feComponentTransfer");
+      stage.setAttribute("result", resultName);
+      for (var i = 0; i < names.length; i++) {
+        var fn = document.createElementNS(svgNs, names[i]);
+        fn.setAttribute("type", type);
+        stage.appendChild(fn);
+      }
+      filter.appendChild(stage);
+      return stage;
+    }
+
+    // Stage 1 — auto levels: amplitude * in^exponent, which lands this page's
+    // paper on white and its ink on the shared target. A curve, not a straight
+    // stretch: it can move the ink a long way without clipping anything, which
+    // a linear map steep enough to do the same could not.
+    autoStage = transferStage("gamma", "auto");
+    // Stage 2 — manual levels: out = slope*in + (1 - slope). White stays white,
+    // so the paper is untouched while darker tones are pulled down.
+    transferStage("linear", "levels");
+
+    // Stage 2 — unsharp mask: out = (1 + a)*levels - a*blur(levels), which is
+    // what feComposite's arithmetic mode computes as k2*i1 + k3*i2. The page
+    // body is painted opaque by the theme CSS, so premultiplied alpha (what
+    // arithmetic works on) is the same as straight colour here.
+    var blur = document.createElementNS(svgNs, "feGaussianBlur");
+    blur.setAttribute("in", "levels");
+    // (feComponentTransfer stages above chain implicitly: each takes the
+    // previous result, and "levels" is the last of them.)
+    blur.setAttribute("result", "blurred");
+    filter.appendChild(blur);
+    var composite = document.createElementNS(svgNs, "feComposite");
+    composite.setAttribute("in", "levels");
+    composite.setAttribute("in2", "blurred");
+    composite.setAttribute("operator", "arithmetic");
+    composite.setAttribute("k1", "0");
+    composite.setAttribute("k4", "0");
+    filter.appendChild(composite);
+
+    host.appendChild(filter);
+    return host;
+  }
+
+  // --- per-page auto levels -------------------------------------------------
+  // Scans vary page to page: one spread can hold a heavily inked page next to a
+  // pale one. Measuring each page and mapping its own paper and ink onto shared
+  // targets is what makes them read alike. The result is just another linear
+  // curve, so it composes with the manual one into the single feComponentTransfer
+  // the filter already has.
+  var AUTO_TARGET_INK = 0.20; // where a page's stroke body is aimed, 0 = black
+  var AUTO_MAX_GAMMA = 5.0;   // a pale page is only pushed so far: past this the
+                              // paper grain and show-through come up with it
+  var autoLevels = null;      // measured {exponent, amplitude}, or null
+  var autoStage = null;       // the gamma feComponentTransfer
+  var autoLevelsMeasured = false;
+  var autoLevelsPending = false;
+
+  // The page image itself, which is what carries the tone. Largest by area, so
+  // a logo or an icon in the margin cannot stand in for the page.
+  function largestPageImage() {
+    var imgs = document.body ? document.body.getElementsByTagName("img") : [];
+    var best = null;
+    var bestArea = 0;
+    for (var i = 0; i < imgs.length; i++) {
+      var area = imgs[i].naturalWidth * imgs[i].naturalHeight;
+      if (area > bestArea) { bestArea = area; best = imgs[i]; }
+    }
+    return best;
+  }
+
+  function measureAutoLevels() {
+    var img = largestPageImage();
+    if (!img) return null;
+    // A thumbnail is plenty for a histogram and keeps this to a couple of
+    // milliseconds per page.
+    var w = 200;
+    var h = Math.max(1, Math.round(w * img.naturalHeight / img.naturalWidth));
+    var canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    var data;
+    try {
+      var ctx = canvas.getContext("2d", { willReadFrequently: true });
+      // Nearest neighbour, deliberately: smoothing the page down to a thumbnail
+      // averages every thin stroke into the paper around it, and the histogram
+      // would then describe a grey haze instead of the ink. Point sampling
+      // keeps real page pixels, at their real tones.
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, w, h);
+      data = ctx.getImageData(0, 0, w, h).data;
+    } catch (e) {
+      return null; // pixels not readable: leave the page alone
+    }
+    var hist = new Array(256);
+    for (var i = 0; i < 256; i++) hist[i] = 0;
+    var total = 0;
+    for (var p = 0; p < data.length; p += 4) {
+      hist[(0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]) | 0]++;
+      total++;
+    }
+    if (!total) return null;
+    // Paper: high enough up the histogram that ink cannot drag it down.
+    var acc = 0;
+    var paper = 255;
+    for (var v = 0; v < 256; v++) {
+      acc += hist[v];
+      if (acc >= total * 0.95) { paper = v; break; }
+    }
+    // Ink: how dark the strokes themselves are. Everything clearly darker than
+    // the paper counts as ink, and the darker tenth of that is taken as the
+    // stroke body — the bulk of ink pixels are the pale antialiased fringe, so
+    // an average of them describes the fringe and not the stroke. A percentile
+    // rather than the minimum, so a few very black pixels (a rule, a
+    // photograph) cannot decide the page on their own.
+    var cut = paper - 38;
+    var inkCount = 0;
+    for (var d = 0; d <= cut; d++) inkCount += hist[d];
+    // Almost no ink (a blank or near-blank page): nothing to judge, and
+    // stretching it would only bring up the grain.
+    if (inkCount < total * 0.002) return null;
+    var want = inkCount * 0.10;
+    var seen = 0;
+    var ink = cut;
+    for (var e = 0; e <= cut; e++) {
+      seen += hist[e];
+      if (seen >= want) { ink = e; break; }
+    }
+    var paperLevel = paper / 255;
+    var inkLevel = ink / 255;
+    if (!(paperLevel > 0.05) || !(inkLevel > 0.01) || !(paperLevel - inkLevel > 0.05))
+      return null;
+    // Solve (ink/paper)^exponent = target, then fold the paper normalisation
+    // into the amplitude: amplitude * paper^exponent == 1, so paper lands on
+    // white exactly and ink lands on the target.
+    var exponent = Math.log(AUTO_TARGET_INK) / Math.log(inkLevel / paperLevel);
+    exponent = Math.min(AUTO_MAX_GAMMA, Math.max(1, exponent));
+    return { exponent: exponent, amplitude: Math.pow(paperLevel, -exponent) };
+  }
+
+  function ensureAutoLevels() {
+    if (autoLevelsMeasured) return;
+    if (!pageImagesReady()) {
+      if (!autoLevelsPending) {
+        autoLevelsPending = true;
+        whenPageImagesReady(function () { applyPageEnhance(); });
+      }
+      return;
+    }
+    autoLevelsMeasured = true;
+    autoLevels = measureAutoLevels();
+  }
+
+  function enhanceStrength(name) {
+    var v = parseFloat(getComputedStyle(document.documentElement)
+                         .getPropertyValue(name));
+    return v > 0 ? v : 0;
+  }
+
+  function applyPageEnhance() {
+    if (!document.body) return;
+    var root = document.documentElement;
+    var slope = enhanceStrength("--spindle-page-levels");
+    var sharpen = enhanceStrength("--spindle-page-sharpen");
+    var auto = enhanceStrength("--spindle-page-autolevels") > 0;
+    if (auto)
+      ensureAutoLevels();
+    var measured = auto ? autoLevels : null;
+    if (!(slope > 1) && !(sharpen > 0) && !measured) {
+      root.classList.remove("spindle-page-enhance");
+      return;
+    }
+    var host = document.getElementById(ENHANCE_HOST_ID);
+    if (!host) {
+      host = buildEnhanceFilter();
+      document.body.appendChild(host);
+    }
+    var manual = slope > 1 ? slope : 1;
+    var nodes = host.getElementsByTagName("*");
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var tag = node.tagName;
+      if (tag.indexOf("feFunc") === 0) {
+        // The auto stage is a gamma and runs first; the manual one is the
+        // straight white-anchored stretch on top of it. Either is the identity
+        // when it is off.
+        if (autoStage && node.parentNode === autoStage) {
+          node.setAttribute("exponent", measured ? measured.exponent : 1);
+          node.setAttribute("amplitude", measured ? measured.amplitude : 1);
+          node.setAttribute("offset", 0);
+        } else {
+          node.setAttribute("slope", manual);
+          node.setAttribute("intercept", 1 - manual);
+        }
+      } else if (tag === "feGaussianBlur") {
+        // 0 would make the blur a pass-through and the composite a no-op,
+        // which is exactly right when sharpening is off.
+        node.setAttribute("stdDeviation",
+                          sharpen > 0
+                            ? SHARPEN_RADIUS / Math.max(0.05, pageDisplayScale)
+                            : 0);
+      } else if (tag === "feComposite") {
+        node.setAttribute("k2", 1 + sharpen);
+        node.setAttribute("k3", -sharpen);
+      }
+    }
+    root.classList.add("spindle-page-enhance");
+  }
+
+  // Called by C++ after every style injection, so a slider drag lands here.
+  window.__spindleRefreshPageEnhance = function () {
+    applyPageEnhance();
+    return true;
   };
 
   function isFixedLayoutDocument() {
@@ -553,21 +809,75 @@
         height = parseFloat(dimensions[2]);
       }
     }
-    if (!(width > 0 && height > 0)) {
+    // Declared by the document: trustworthy the moment it is read.
+    var trusted = width > 0 && height > 0;
+    if (!trusted) {
       fixedLayoutImage = singlePageImage(document.body);
       var natural = fixedLayoutImage ? imageNaturalSize(fixedLayoutImage) : null;
       if (natural) {
         width = natural.width;
         height = natural.height;
+        trusted = true;
       }
     }
     if (!(width > 0 && height > 0)) {
+      // Last resort: measure the page box. Only meaningful once every image in
+      // it has dimensions — before that the box is whatever the not-yet-sized
+      // content happens to occupy, which has nothing to do with the page.
       var first = document.body && document.body.firstElementChild;
       var rect = first ? first.getBoundingClientRect() : document.body.getBoundingClientRect();
       width = Math.max(rect.width, document.body.scrollWidth);
       height = Math.max(rect.height, document.body.scrollHeight);
+      // ...and only if something in the page has an intrinsic size to anchor
+      // the box. A pre-paginated page that is nothing but flowing text has no
+      // page size of its own: whatever is measured is just the current
+      // viewport, so C++ is told nothing and the view keeps filling its half.
+      trusted = pageHasIntrinsicContent() && pageImagesReady();
     }
-    return width > 0 && height > 0 ? { width: width, height: height } : null;
+    return width > 0 && height > 0
+             ? { width: width, height: height, trusted: trusted }
+             : null;
+  }
+
+  function pageHasIntrinsicContent() {
+    if (!document.body) return false;
+    return document.body.getElementsByTagName("img").length > 0
+           || document.body.getElementsByTagName("svg").length > 0;
+  }
+
+  // Every image has produced its dimensions, or has failed and never will.
+  function pageImagesReady() {
+    var imgs = document.body ? document.body.getElementsByTagName("img") : [];
+    for (var i = 0; i < imgs.length; i++) {
+      if (!(imgs[i].naturalWidth > 0) && !imgs[i].complete) return false;
+    }
+    return true;
+  }
+
+  function whenPageImagesReady(callback) {
+    if (pageImagesReady()) { callback(); return; }
+    var done = false;
+    var tries = 0;
+    var timer = setInterval(function () {
+      // The poll is the one that always fires: an image that was already
+      // complete when this ran never emits load again.
+      if (pageImagesReady() || ++tries > 100) finish();
+    }, 30);
+    function finish() {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      callback();
+    }
+    var imgs = document.body.getElementsByTagName("img");
+    for (var i = 0; i < imgs.length; i++) {
+      imgs[i].addEventListener("load", function () {
+        if (pageImagesReady()) finish();
+      }, { once: true });
+      imgs[i].addEventListener("error", function () {
+        if (pageImagesReady()) finish();
+      }, { once: true });
+    }
   }
 
   function layoutFixedPage() {
@@ -586,11 +896,13 @@
     var vh = Math.max(1, root.clientHeight || window.innerHeight);
     var width = fixedLayoutView.width;
     var height = fixedLayoutView.height;
+    // C++ normally sizes this view to the page's own aspect ratio, so both
+    // ratios are equal and the page fills the view exactly. The min() still
+    // matters for the moment before the first size report is acted on, and for
+    // the fallback where C++ never takes over.
     var scale = Math.min(vw / width, vh / height);
-    var scaledWidth = width * scale;
-    var left = fixedAlign === "left" ? 0
-             : fixedAlign === "right" ? Math.max(0, vw - scaledWidth)
-             : Math.max(0, (vw - scaledWidth) / 2);
+    pageDisplayScale = scale; // the enhance filter's blur radius follows it
+    var left = Math.max(0, (vw - width * scale) / 2);
     var top = Math.max(0, (vh - height * scale) / 2);
 
     var body = document.body;
@@ -611,22 +923,34 @@
     body.style.setProperty("overflow", "hidden", "important");
     body.style.setProperty("transform-origin", "0 0", "important");
     body.style.setProperty("transform", "scale(" + scale + ")", "important");
+    applyPageEnhance(); // the blur radius depends on the scale just applied
   }
+
+  var fixedSizeRetryScheduled = false;
 
   function applyFixedLayoutFit() {
     if (!isFixedLayoutDocument() || !document.body) return false;
     var size = fixedViewportSize();
     if (!size) return false;
     fixedLayoutView = size;
+    fixedSizeTrusted = size.trusted;
     layoutFixedPage();
-    if (fixedLayoutImage && fixedLayoutImage.tagName.toLowerCase() === "img"
-        && !imageNaturalSize(fixedLayoutImage)) {
-      fixedLayoutImage.addEventListener("load", function () {
-        var natural = imageNaturalSize(fixedLayoutImage);
-        if (!natural) return;
-        fixedLayoutView = natural;
-        layoutFixedPage();
-      }, { once: true });
+    if (size.trusted) {
+      reportFixedSize();
+    } else if (!fixedSizeRetryScheduled && pageHasIntrinsicContent()) {
+      // C++ sizes this view to whatever is reported, so a guess taken before
+      // the images have dimensions would show as a page cut in half. Fit the
+      // page locally for now, and report only once the size is real.
+      fixedSizeRetryScheduled = true;
+      whenPageImagesReady(function () {
+        var settled = fixedViewportSize();
+        if (settled) {
+          fixedLayoutView = settled;
+          fixedSizeTrusted = settled.trusted;
+          layoutFixedPage();
+        }
+        reportFixedSize();
+      });
     }
     return true;
   }
@@ -709,6 +1033,7 @@
     var vw = Math.max(1, root.clientWidth || window.innerWidth);
     var vh = Math.max(1, root.clientHeight || window.innerHeight);
     var fit = Math.min(vw / natural.width, vh / natural.height);
+    pageDisplayScale = fit * imageView.zoom;
     var imageWidth = Math.max(1, natural.width * fit * imageView.zoom);
     var imageHeight = Math.max(1, natural.height * fit * imageView.zoom);
     var stageWidth = Math.max(vw, imageWidth);
@@ -720,6 +1045,7 @@
     stage.style.setProperty("--spindle-stage-width", stageWidth + "px");
     stage.style.setProperty("--spindle-stage-height", stageHeight + "px");
 
+    applyPageEnhance(); // the blur radius depends on the zoom just applied
     var canPan = stageWidth > vw + 0.5 || stageHeight > vh + 0.5;
     root.classList.toggle("spindle-image-pannable", canPan);
     if (centerOverflow && canPan) {
@@ -806,7 +1132,8 @@
   });
 
   // Called from the A-/A+ buttons and Ctrl+wheel. Returning false tells C++ to
-  // apply the command to ordinary text zoom instead.
+  // apply the command elsewhere: to its own fixed-layout canvas zoom for a
+  // pre-paginated page, or to ordinary text zoom for a normal chapter.
   window.__spindleImageView = {
     zoomBy: function (delta) {
       if (!imageView) return false;
@@ -928,6 +1255,10 @@
   function init() {
     new QWebChannel(qt.webChannelTransport, function (channel) {
       window.spindle = channel.objects.spindle;
+      // The fixed-layout fit runs before the channel exists, so its size report
+      // waits for this moment. The companion needs it too — C++ sizes both
+      // views of a spread — so report before the companion bails out below.
+      reportFixedSize();
       if (window.__spindleCompanion) return;
       window.spindle.pageWritingModeDetected(pageUsesVerticalWriting());
       window.spindle.highlightsChanged.connect(applyAll);
@@ -949,6 +1280,7 @@
     installFixedPageEdgeTurns();
   else
     applyImageFit();
+  applyPageEnhance(); // after applyImageFit: the stage has to exist first
 
   // Safety net, called by C++ after every load: re-run the fixed-layout fit
   // (or apply it for the first time if the DocumentReady injection ran before
@@ -958,6 +1290,7 @@
   window.__spindleFixedRefit = function () {
     if (fixedLayoutPage) {
       layoutFixedPage();
+      reportFixedSize();
     } else if (isFixedLayoutDocument()) {
       fixedLayoutPage = applyFixedLayoutFit();
       if (fixedLayoutPage) installFixedPageEdgeTurns();

@@ -10,6 +10,23 @@ rendered with full fidelity to its own CSS — including Japanese vertical writi
 through a custom `epub://` URL scheme, so chapters load their stylesheets,
 fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
 
+## Get Spindle
+
+Prebuilt packages are published on the
+[Releases page](https://github.com/fukuyori/Spindle/releases).
+
+| OS | File |
+|---|---|
+| Windows | `Spindle-<version>-windows-x64.exe` (installer) or `Spindle-<version>-windows-x64.zip` (unpack and run) |
+| macOS | `Spindle-<version>-macos-<arch>.dmg` |
+| Linux | `Spindle-<version>-linux-<arch>.AppImage`, `.deb` or `.tar.gz` |
+
+`<arch>` is the architecture the package was actually built for — `arm64` on
+Apple Silicon, for instance.
+
+> The packages are unsigned, so Windows SmartScreen and macOS Gatekeeper warn
+> on first launch. To build from source instead, see [Build](#build).
+
 ## Features
 
 - **Bilingual UI (English / Japanese)** — the interface follows the system
@@ -27,6 +44,10 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   press, and clicking the outer 15% of the page turns in that direction. The
   first spine page is always shown alone as the cover. Binding can be automatic,
   right-bound, or left-bound; automatic uses right binding for vertical writing.
+  **A−/A+ and Ctrl+mouse wheel zoom the page**, and anything past the edge of the
+  window can be dragged into view. A spread behaves as one sheet: both halves
+  zoom and pan together and stay joined at the spine, which travels with them.
+  Turning the page starts fitted again.
 - **Reading controls** — chapter navigation, font zoom, a font picker that can
   override the book's own fonts, line wrapping by window width or a chosen
   character count, light / sepia / dark themes, and a collapsible table-of-contents
@@ -36,6 +57,11 @@ fonts, and images exactly as authored. Targets Windows, macOS, and Linux.
   chapter, and after one is opened the pane stays visible and switches back to
   the table of contents. Each theme stores separate brightness sliders for the
   page background, original text, and translated text.
+- **Legibility adjustments for scanned books** — for image pages (fixed-layout
+  pages and single-image chapters): darken the text while leaving the paper
+  white, sharpen smeared strokes, and even out density page by page by
+  measuring each page's own paper and ink. A scan whose pages vary in density
+  reads evenly, both halves of a spread alike.
 - **Full-text search** across the whole book with chapter-grouped snippets and
   in-page jump.
 - **Highlights & notes** — select text to highlight with a 6-colour picker;
@@ -110,16 +136,20 @@ in a new window, so you can read several at once.
 - **Sidebar:** toggle the left pane with **Sidebar**. Use **History** to show the
   recent EPUB list in that pane; opening a history item keeps the pane visible
   and switches it back to the table of contents.
-- **Brightness:** choose **View → Adjust Brightness…** to adjust the current
-  theme, or select another theme in the dialog. Background, original text, and
-  translated text are saved separately for each theme.
+- **Display adjustments:** choose **View → Display Adjustments…** to adjust the
+  current theme, or select another theme in the dialog. Background, original
+  text, and translated text are saved separately for each theme. The same
+  dialog carries **Darken text on image pages**, **Sharpen edges on image
+  pages**, and **Even out density page by page**, which are shared by every
+  theme.
 - **Line wrapping:** choose **View → Wrap Settings…** to fit lines to the window
   or limit them to a selected measure of 10–120 characters (initially 40).
   The saved preference also applies to vertical writing.
 - **Fixed layout:** use **View → Fixed-Layout Facing Pages** to toggle spreads,
   and **View → Fixed-Layout Binding Direction** to choose automatic, right-bound,
   or left-bound. Binding is saved per EPUB in Spindle's settings; the EPUB file
-  itself is never modified.
+  itself is never modified. Zoom with **A−/A+** or **Ctrl+mouse wheel**, then
+  drag to move around a page larger than the window.
 - **Highlight:** select text → pick a colour from the popup (which also offers
   Copy, Translate, Summarize, and Search the web). Click an existing highlight
   to copy it, search it on the web, change its colour, edit its note, or delete it.
@@ -299,22 +329,6 @@ The deploy tools bundle the Qt WebEngine runtime so the app is self-contained.
 > or `aqtinstall` and run `CMAKE_PREFIX_PATH=/path/to/Qt/6.x/macos ./scripts/package-macos.sh`.
 > The same applies on Windows/Linux: use a complete Qt kit. macOS `.dmg`s are
 > unsigned — `codesign`/notarize for wider distribution.
-
-## Continuous integration / releases
-
-[`.github/workflows/build.yml`](.github/workflows/build.yml) builds and packages
-all three platforms on every push/PR using the official Qt (via `aqtinstall`):
-
-- **Linux** → AppImage + `.deb` / `.tar.gz`
-- **macOS** → `.dmg`
-- **Windows** → portable `.zip` + Inno Setup installer `.exe`
-
-Artifacts are uploaded for every run. Push a tag like `v0.3.5` to also publish a
-GitHub Release with all packages attached.
-
-```sh
-git tag v0.3.5 && git push origin v0.3.5
-```
 
 ## Project layout
 

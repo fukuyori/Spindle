@@ -92,8 +92,8 @@
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="593"/>
-        <source>表示の明るさ</source>
-        <translation>Display Brightness</translation>
+        <source>表示調整</source>
+        <translation>Display Adjustments</translation>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="600"/>
@@ -117,6 +117,22 @@
         <location filename="../src/ui/MainWindow.cpp" line="629"/>
         <source>翻訳文</source>
         <translation>Translation</translation>
+    </message>
+    <message>
+        <source>画像ページの文字を濃く</source>
+        <translation>Darken text on image pages</translation>
+    </message>
+    <message>
+        <source>画像ページの輪郭を強調</source>
+        <translation>Sharpen edges on image pages</translation>
+    </message>
+    <message>
+        <source>ページごとに濃さを自動で揃える</source>
+        <translation>Even out density page by page</translation>
+    </message>
+    <message>
+        <source>スキャン画像の固定レイアウトページと画像チャプターに効きます。「濃く」は白地を保ったまま文字を沈め、「輪郭」はにじんだ字画を締めます。「自動で揃える」はページごとに地と文字の濃さを測って基準に合わせるので、ページによって濃さがばらつくスキャンが読みやすくなります（その上に「濃く」を重ねられます）。強くするとノイズも目立ちます。テーマ共通の設定です。</source>
+        <translation>Applies to scanned fixed-layout pages and image chapters. Darken pulls the ink down while leaving the paper white; Sharpen tightens smeared strokes. Even out measures each page's paper and ink and maps them onto shared targets, so a scan whose pages vary in density reads evenly (Darken still applies on top). Pushed hard, all of them bring out noise as well. Shared by every theme.</translation>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="701"/>
@@ -221,8 +237,8 @@
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="789"/>
-        <source>明るさ調整…</source>
-        <translation>Adjust Brightness…</translation>
+        <source>表示調整…</source>
+        <translation>Display Adjustments…</translation>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="792"/>
