@@ -329,8 +329,13 @@ The deploy tools bundle the Qt WebEngine runtime so the app is self-contained.
 > (the packaged `.app` can render blank). For a distributable macOS build,
 > install Qt from the [official installer](https://www.qt.io/download-qt-installer)
 > or `aqtinstall` and run `CMAKE_PREFIX_PATH=/path/to/Qt/6.x/macos ./scripts/package-macos.sh`.
-> The same applies on Windows/Linux: use a complete Qt kit. macOS `.dmg`s are
-> unsigned — `codesign`/notarize for wider distribution.
+> The same applies on Windows/Linux: use a complete Qt kit. On macOS,
+> `package-macos.sh` signs with a Developer ID Application certificate when
+> available, submits the `.dmg` with `xcrun notarytool` using the
+> configured or automatically detected keychain profile, and staples the
+> accepted ticket. Apple ID credentials can also be supplied through the
+> documented environment variables. Set
+> `SKIP_NOTARIZE=1` only when building a local, non-notarized package.
 
 ## Project layout
 

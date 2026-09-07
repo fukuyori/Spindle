@@ -306,8 +306,11 @@ Authenticode 署名を付与します（証明書は `CODESIGN_CERT` に `.pfx` 
 > [公式インストーラ](https://www.qt.io/download-qt-installer) または
 > `aqtinstall` で Qt を導入し、
 > `CMAKE_PREFIX_PATH=/path/to/Qt/6.x/macos ./scripts/package-macos.sh` を実行して
-> ください。Windows / Linux でも同様に完全な Qt キットを使用します。macOS の
-> `.dmg` は未署名です。広く配布する場合は `codesign` ／ notarize してください。
+> ください。Windows / Linux でも同様に完全な Qt キットを使用します。macOS では
+> Developer ID Application 証明書が利用できる場合、`package-macos.sh` が署名し、
+> 設定済みまたは自動検出されたキーチェーンプロファイルで `xcrun notarytool` に
+> 提出して、承認後に staple します。環境変数による Apple ID 認証にも対応します。
+> ローカル用に公証しない場合のみ `SKIP_NOTARIZE=1` を指定してください。
 
 ## プロジェクト構成
 

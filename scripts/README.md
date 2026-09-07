@@ -33,7 +33,7 @@ was actually built for (read from the PE header / `lipo`), not the host's.
 ## Examples
 
 ```sh
-# macOS — build a .dmg
+# macOS — build, sign, notarize, staple, and package a .dmg
 ./scripts/package-macos.sh
 
 # Linux — AppImage + .deb (downloads linuxdeploy on first run)
@@ -82,10 +82,12 @@ a later rebuild cannot ship a stale signature.
 - Windows packaging scripts first deploy the Qt runtime into the build output
   directory, then stage that deployed build output for ZIP / Inno Setup
   packaging.
-- macOS `.dmg` is only **ad-hoc signed**. For distribution outside your own
-  machine, `codesign` with a Developer ID identity and notarize
-  `build/spindle.app` before running the packaging script (or sign the
-  resulting app and re-create the dmg).
+- macOS packaging signs with a Developer ID Application identity when one is
+  available, submits the `.dmg` with `xcrun notarytool` using the
+  configured keychain profile (or an auto-detected `notarytool`, `spindle`, or
+  `notary` profile), staples the accepted ticket, and verifies it. Apple ID,
+  team ID, and app-specific-password environment variables are also supported.
+  Set `SKIP_NOTARIZE=1` only for a local, non-notarized package.
 - `package-windows-inno.ps1` requires Inno Setup 6 (`ISCC.exe`) on PATH, in the
   default install location, or passed via `-InnoCompiler`.
 - CPack generators are also configured in `CMakeLists.txt`, so from a build
