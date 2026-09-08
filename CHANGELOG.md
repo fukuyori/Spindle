@@ -4,6 +4,14 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] - 2026-09-08
+
+### Fixed
+- **Standalone URLs no longer fail Japanese translation validation.** URL-only
+  blocks are preserved unchanged without sending them to Ollama, so translated
+  and bilingual EPUB exports no longer stop on addresses such as
+  `www.harpercollins.com`.
+
 ## [0.8.0] - 2026-09-06
 
 ### Added

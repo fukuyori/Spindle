@@ -8,6 +8,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QStringList>
+#include <QTimer>
 #include <QUrl>
 
 namespace {
@@ -22,6 +23,30 @@ constexpr int kTransferTimeoutMs = 300'000;
 // tokens until the request-level timeout expires (and block the next queued
 // request on single-slot Ollama servers).
 constexpr int kGlossaryMaxPredictTokens = 2048;
+
+// A standalone URL has no language-specific prose to translate. Sending it to
+// the model is unnecessary, and an unchanged Latin-script URL would otherwise
+// be rejected by clearlyWrongLanguage() for Japanese and other non-Latin
+// targets. Keep the check deliberately narrow: prose that merely contains a
+// URL must still be translated.
+bool isStandaloneUrl(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return false;
+
+    QString candidate = trimmed;
+    if (candidate.startsWith(QLatin1String("www."), Qt::CaseInsensitive))
+        candidate.prepend(QStringLiteral("https://"));
+
+    const QUrl url(candidate, QUrl::StrictMode);
+    if (!url.isValid() || url.host().isEmpty())
+        return false;
+
+    const QString scheme = url.scheme().toLower();
+    return scheme == QLatin1String("http") || scheme == QLatin1String("https")
+        || scheme == QLatin1String("ftp");
+}
 
 QString shortResponseForMessage(const QByteArray &bytes)
 {
@@ -154,6 +179,15 @@ void OllamaClient::translate(const QString &endpoint, const QString &model,
                              const QString &glossary, int requestId,
                              const QString &targetCode)
 {
+    if (isStandaloneUrl(text)) {
+        // Match the asynchronous completion contract of a network request so
+        // callers can safely update their in-flight queues before this signal.
+        const QString unchanged = text.trimmed();
+        QTimer::singleShot(0, this, [this, requestId, unchanged] {
+            emit finished(requestId, true, unchanged);
+        });
+        return;
+    }
     translateAttempt(endpoint, model, targetLang, text, glossary, requestId, targetCode, 1);
 }
 
