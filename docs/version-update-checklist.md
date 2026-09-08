@@ -6,7 +6,7 @@ release touches very few files. The list below is the whole of it.
 ## 1. `CMakeLists.txt` — the single source of truth
 
 ```cmake
-project(Spindle VERSION 0.8.0 LANGUAGES C CXX)
+project(Spindle VERSION 0.8.1 LANGUAGES C CXX)
 ```
 
 `PROJECT_VERSION` flows from here into:
@@ -46,7 +46,7 @@ and packages all three platforms on every push and PR; a tag matching `v*`
 additionally publishes a GitHub Release with every package attached.
 
 ```sh
-git tag v0.8.0 && git push origin v0.8.0
+git tag v0.8.1 && git push origin v0.8.1
 ```
 
 The packages CI produces are unsigned. A signed Windows build has to be made on
