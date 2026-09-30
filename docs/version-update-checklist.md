@@ -6,7 +6,7 @@ release touches very few files. The list below is the whole of it.
 ## 1. `CMakeLists.txt` — the single source of truth
 
 ```cmake
-project(Spindle VERSION 0.8.1 LANGUAGES C CXX)
+project(Spindle VERSION 0.9.0 LANGUAGES C CXX)
 ```
 
 `PROJECT_VERSION` flows from here into:
@@ -36,21 +36,31 @@ release.
 
 ## Not part of a version bump
 
-- `README.md` / `README.ja.md` mention `v0.3.5` only as an example of the tag
-  format for the release workflow. Leave them alone.
 - `i18n/spindle_en.ts` carries no version.
+
 ## Releasing
 
-Tagging is a separate, deliberate step. `.github/workflows/build.yml` builds
-and packages all three platforms on every push and PR; a tag matching `v*`
-additionally publishes a GitHub Release with every package attached.
+Tagging is a separate, deliberate step. Release tags are the bare version
+number with no `v` prefix (`0.9.0`); the only exception in history is the early
+`v0.1.1`, which the `CHANGELOG.md` compare links refer to by that name.
+
+`.github/workflows/build.yml` builds and packages all three platforms on every
+push and PR; a tag matching `<major>.<minor>.<patch>` additionally publishes a
+GitHub Release with every package attached.
 
 ```sh
-git tag v0.8.1 && git push origin v0.8.1
+git tag 0.9.0 && git push origin 0.9.0
 ```
 
-The packages CI produces are unsigned. A signed Windows build has to be made on
-a machine that holds the certificate:
+Also add the `[<version>]: .../compare/<previous>...<version>` link at the
+bottom of `CHANGELOG.md`.
+
+The packages CI produces are unsigned. The release job never overwrites a file
+of the same name that is already attached (`overwrite_files: false`) and keeps
+an existing release body, so signed packages uploaded by hand survive it. If CI
+attaches first, delete its unsigned file of the same name before uploading the
+signed one. A signed Windows build has to be made on a machine that holds the
+certificate:
 
 ```powershell
 pwsh scripts/package-windows-inno.ps1 -Sign

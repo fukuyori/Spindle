@@ -3,7 +3,8 @@ name: Build & Package
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    # Release tags are the bare version number (0.9.0), no "v" prefix.
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
   pull_request:
   workflow_dispatch:
 
@@ -71,6 +72,11 @@ jobs:
         run: bash ./scripts/package-macos.sh
         env:
           CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
+          # The runner has no Developer ID certificate or notary credentials,
+          # so package-macos.sh would stop before building. With notarization
+          # skipped and no identity found, it ad-hoc signs the app and leaves
+          # the .dmg unsigned. Signed, notarized packages are made by hand.
+          SKIP_NOTARIZE: '1'
 
       - uses: actions/upload-artifact@v4
         with:
@@ -119,7 +125,7 @@ jobs:
   # -------------------------------------------------------------- Release ---
   release:
     needs: [linux, macos, windows]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -128,8 +134,13 @@ jobs:
         with:
           path: artifacts
 
+      # Releases are also made by hand with signed packages (the signing
+      # certificate never reaches CI). overwrite_files: false keeps a signed
+      # file already attached from being replaced by CI's unsigned one of the
+      # same name, and without generate_release_notes an existing hand-written
+      # body is left as it is (the action would append generated notes to it).
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          generate_release_notes: true
+          overwrite_files: false
