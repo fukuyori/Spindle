@@ -261,6 +261,26 @@
         <translation>Wrap Settings…</translation>
     </message>
     <message>
+        <source>ページを保存…</source>
+        <translation>Save Page…</translation>
+    </message>
+    <message>
+        <source>可読性優先 (配色を自動補正)</source>
+        <translation>Prioritize Readability (Auto-Correct Colors)</translation>
+    </message>
+    <message>
+        <source>書籍の配色を使用</source>
+        <translation>Use Book Colors</translation>
+    </message>
+    <message>
+        <source>文字色をテーマで統一し、書籍が背景色を付けた箇所は読める文字色に補正します</source>
+        <translation>Uses the theme text color everywhere and corrects it where the book paints its own background</translation>
+    </message>
+    <message>
+        <source>書籍が指定した文字色と背景色をそのまま使います</source>
+        <translation>Keeps the text and background colors specified by the book</translation>
+    </message>
+    <message>
         <location filename="../src/ui/MainWindow.cpp" line="817"/>
         <source>固定レイアウトを見開き表示</source>
         <translation>Fixed-Layout Facing Pages</translation>

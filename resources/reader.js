@@ -785,6 +785,106 @@
     return true;
   };
 
+  // --- contrast fix ("可読性優先" color mode) --------------------------------
+  // The theme forces one text color on everything, but the book's own element
+  // backgrounds stay (a black heading band, a grey column box). Where the
+  // theme color would not read on such a background, mark the element
+  // .spindle-contrast and give it a color that does; the theme CSS applies it
+  // to the whole subtree through --spindle-contrast-color.
+  var CONTRAST_MIN = 4.5; // WCAG AA for body text
+
+  function parseColor(text) {
+    var m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+)(%?))?\s*\)/
+              .exec(text || "");
+    if (!m) return null;
+    var a = m[4] === undefined ? 1 : parseFloat(m[4]) / (m[5] ? 100 : 1);
+    return { r: +m[1], g: +m[2], b: +m[3], a: a };
+  }
+
+  // `top` painted over the opaque `bottom`.
+  function composite(top, bottom) {
+    var a = top.a;
+    return {
+      r: top.r * a + bottom.r * (1 - a),
+      g: top.g * a + bottom.g * (1 - a),
+      b: top.b * a + bottom.b * (1 - a),
+      a: 1
+    };
+  }
+
+  function luminance(c) {
+    function ch(v) {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    }
+    return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b);
+  }
+
+  function contrastRatio(a, b) {
+    var la = luminance(a), lb = luminance(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+
+  function clearContrastFix() {
+    var marked = document.querySelectorAll(".spindle-contrast");
+    for (var i = 0; i < marked.length; i++) {
+      marked[i].classList.remove("spindle-contrast");
+      marked[i].style.removeProperty("--spindle-contrast-color");
+    }
+  }
+
+  function applyContrastFix() {
+    if (!document.body) return;
+    clearContrastFix();
+    var root = document.documentElement;
+    if (getComputedStyle(root).getPropertyValue("--spindle-color-mode").trim() !== "readable")
+      return;
+    var pageBg = parseColor(getComputedStyle(document.body).backgroundColor);
+    if (!pageBg || pageBg.a < 1) pageBg = parseColor(getComputedStyle(root).backgroundColor);
+    var themeText = parseColor(getComputedStyle(document.body).color);
+    if (!pageBg || !themeText) return;
+    if (pageBg.a < 1) pageBg = composite(pageBg, { r: 255, g: 255, b: 255, a: 1 });
+
+    var BLACK = { r: 0, g: 0, b: 0, a: 1 };
+    var WHITE = { r: 255, g: 255, b: 255, a: 1 };
+    // Elements with a painted background, in document order, so an ancestor is
+    // always resolved before its descendants.
+    var info = new Map(); // element -> { bg: opaque effective bg, text: color }
+    var all = document.body.getElementsByTagName("*");
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.closest("#__spindle_image_stage")) continue;
+      var own = parseColor(getComputedStyle(el).backgroundColor);
+      if (!own || own.a <= 0) continue;
+      var parent = null;
+      for (var p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        if (info.has(p)) { parent = info.get(p); break; }
+      }
+      var under = parent ? parent.bg : pageBg;
+      var inherited = parent ? parent.text : themeText;
+      var bg = composite(own, under);
+      var text = themeText;
+      if (contrastRatio(themeText, bg) < CONTRAST_MIN)
+        text = contrastRatio(BLACK, bg) >= contrastRatio(WHITE, bg) ? BLACK : WHITE;
+      info.set(el, { bg: bg, text: text });
+      // Mark only where the color changes from what the subtree would get
+      // anyway; a nested box that reads fine inside a marked one is marked
+      // too, so it goes back to the theme color.
+      if (text.r !== inherited.r || text.g !== inherited.g || text.b !== inherited.b) {
+        el.style.setProperty("--spindle-contrast-color",
+                             "rgb(" + Math.round(text.r) + "," + Math.round(text.g) + ","
+                               + Math.round(text.b) + ")");
+        el.classList.add("spindle-contrast");
+      }
+    }
+  }
+
+  // Called by C++ after every style injection (theme, brightness, color mode).
+  window.__spindleRefreshContrast = function () {
+    applyContrastFix();
+    return true;
+  };
+
   function isFixedLayoutDocument() {
     return getComputedStyle(document.documentElement)
              .getPropertyValue("--spindle-fixed-layout").trim() === "1";
@@ -1281,6 +1381,11 @@
   else
     applyImageFit();
   applyPageEnhance(); // after applyImageFit: the stage has to exist first
+  applyContrastFix();
+  // Linked stylesheets can still be arriving when this script runs; evaluate
+  // again once everything the page depends on has loaded.
+  if (document.readyState !== "complete")
+    window.addEventListener("load", applyContrastFix, { once: true });
 
   // Safety net, called by C++ after every load: re-run the fixed-layout fit
   // (or apply it for the first time if the DocumentReady injection ran before

@@ -805,6 +805,17 @@ void MainWindow::buildUi()
     connect(m_recentEpubsMenu, &QMenu::aboutToShow, this, &MainWindow::updateRecentEpubsMenu);
     updateRecentEpubsMenu();
     fileMenu->addSeparator();
+    // Same as the reading view's context-menu "Save page": the engine's own
+    // SavePage action, which arrives at the profile's downloadRequested handler
+    // (see ensureWebView) to ask for the destination.
+    m_savePageAction = fileMenu->addAction(tr("ページを保存…"));
+    m_savePageAction->setShortcut(QKeySequence::Save);
+    m_savePageAction->setEnabled(false); // enabled by updateNavButtons once a book is open
+    connect(m_savePageAction, &QAction::triggered, this, [this] {
+        if (m_view && m_book)
+            m_view->page()->triggerAction(QWebEnginePage::SavePage);
+    });
+    fileMenu->addSeparator();
     QAction *quitAction = fileMenu->addAction(tr("終了"));
     quitAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
     quitAction->setMenuRole(QAction::QuitRole); // macOS: shown in the app menu
@@ -838,6 +849,24 @@ void MainWindow::buildUi()
         connect(act, &QAction::triggered, this, [this, i] { setTheme(i); });
         m_themeActs[i] = act;
     }
+    themeMenu->addSeparator();
+    QActionGroup *colorModeGroup = new QActionGroup(this);
+    colorModeGroup->setExclusive(true);
+    const QString colorModeLabels[2] = {tr("可読性優先 (配色を自動補正)"),
+                                        tr("書籍の配色を使用")};
+    const QString colorModeTips[2] = {
+        tr("文字色をテーマで統一し、書籍が背景色を付けた箇所は読める文字色に補正します"),
+        tr("書籍が指定した文字色と背景色をそのまま使います")};
+    for (int i = 0; i < 2; ++i) {
+        QAction *act = themeMenu->addAction(colorModeLabels[i]);
+        act->setCheckable(true);
+        act->setToolTip(colorModeTips[i]);
+        act->setStatusTip(colorModeTips[i]);
+        colorModeGroup->addAction(act);
+        connect(act, &QAction::triggered, this, [this, i] { setColorMode(i); });
+        m_colorModeActs[i] = act;
+    }
+    themeMenu->setToolTipsVisible(true);
     viewMenu->addAction(tr("表示調整…"), this, &MainWindow::openAppearanceDialog);
     // UI language: applied at startup (main.cpp installs the matching
     // translator), so switching here only persists the choice.
@@ -1500,6 +1529,10 @@ void MainWindow::restoreViewSettings()
         qBound(0, settings.value(QStringLiteral("view/theme"), 0).toInt(), 2));
     if (m_themeActs[static_cast<int>(m_theme)])
         m_themeActs[static_cast<int>(m_theme)]->setChecked(true);
+    m_colorMode = static_cast<ColorMode>(
+        qBound(0, settings.value(QStringLiteral("view/colorMode"), 0).toInt(), 1));
+    if (m_colorModeActs[static_cast<int>(m_colorMode)])
+        m_colorModeActs[static_cast<int>(m_colorMode)]->setChecked(true);
     for (int i = 0; i < 3; ++i) {
         const QString prefix = QStringLiteral("appearance/%1/").arg(themeKeyForIndex(i));
         m_brightness[i].background =
@@ -1944,11 +1977,29 @@ QString MainWindow::viewStyleCss() const
     const QString bg = themeBackground().name();
     const QString original = originalTextColor().name();
     const QString translation = translationTextColor().name();
-    QString css = QStringLiteral(
-        "html,body{background:%1 !important;}"
-        "body,body *{color:%2 !important;}"
-        ".spindle-translation,.spindle-translation *{color:%3 !important;}")
-                      .arg(bg, original, translation);
+    QString css;
+    if (m_colorMode == ColorMode::Book) {
+        // Only the page itself takes the theme; any element the book colors
+        // keeps its own text/background pair, so the two stay matched.
+        css = QStringLiteral(
+                  "html,body{background:%1 !important;color:%2 !important;}"
+                  ".spindle-translation,.spindle-translation *{color:%3 !important;}")
+                  .arg(bg, original, translation);
+    } else {
+        // Every text takes the theme color. The book's own element backgrounds
+        // are left as they are; reader.js finds the ones the theme color does
+        // not read on and marks them .spindle-contrast with a color that does
+        // (--spindle-contrast-color, inherited by the subtree). That rule comes
+        // last so it also wins over the translation color inside such a box.
+        css = QStringLiteral(
+                  "html{--spindle-color-mode:readable;}"
+                  "html,body{background:%1 !important;}"
+                  "body,body *{color:%2 !important;}"
+                  ".spindle-translation,.spindle-translation *{color:%3 !important;}"
+                  ".spindle-contrast,.spindle-contrast *{"
+                  "color:var(--spindle-contrast-color) !important;}")
+                  .arg(bg, original, translation);
+    }
     if (m_book && m_book->fixedLayout())
         css += QStringLiteral(" html{--spindle-fixed-layout:1;}");
     // Comfortable left/right reading margins (physical, so they apply equally to
@@ -2128,8 +2179,11 @@ void MainWindow::injectViewStyle()
     // The SVG filter the scanned-page levels rule points at is built by the
     // page from the CSS variable above, so it has to be rebuilt whenever that
     // variable changes (a slider drag reaches the page through this path).
+    // The contrast fix depends on the theme colors and the color mode, so it
+    // is re-evaluated on the same path.
     const QString levelsJs = QStringLiteral(
-        "window.__spindleRefreshPageEnhance && window.__spindleRefreshPageEnhance();");
+        "window.__spindleRefreshPageEnhance && window.__spindleRefreshPageEnhance();"
+        "window.__spindleRefreshContrast && window.__spindleRefreshContrast();");
     m_view->page()->runJavaScript(themeStyleJs(css),
                                   QWebEngineScript::ApplicationWorld); // current page
     m_view->page()->runJavaScript(levelsJs, QWebEngineScript::ApplicationWorld);
@@ -2226,6 +2280,8 @@ void MainWindow::updateNavButtons()
     if (m_nextAction)
         m_nextAction->setEnabled(
             has && m_currentChapter + pageTurnStep() < m_book->chapters().size());
+    if (m_savePageAction)
+        m_savePageAction->setEnabled(has && m_view);
 }
 
 // --- navigation / controls -------------------------------------------------
@@ -2616,6 +2672,15 @@ void MainWindow::setTheme(int theme)
     if (m_view)
         m_view->page()->setBackgroundColor(themeBackground());
     updatePlaceholderBackground();
+    injectViewStyle();
+}
+
+void MainWindow::setColorMode(int mode)
+{
+    m_colorMode = static_cast<ColorMode>(qBound(0, mode, 1));
+    if (m_colorModeActs[static_cast<int>(m_colorMode)])
+        m_colorModeActs[static_cast<int>(m_colorMode)]->setChecked(true);
+    QSettings().setValue(QStringLiteral("view/colorMode"), static_cast<int>(m_colorMode));
     injectViewStyle();
 }
 

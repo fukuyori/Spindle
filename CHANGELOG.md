@@ -4,6 +4,21 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-09-30
+
+### Added
+- **Color handling choice for themes**, in View ▸ Theme:
+  - **Prioritize Readability (Auto-Correct Colors)** — the default. Text takes
+    the theme color as before, but where the book paints its own background
+    (a black heading band, a grey column box) the text is switched to black or
+    white so it keeps at least a 4.5:1 contrast on it. Previously such text
+    could end up dark on dark and unreadable.
+  - **Use Book Colors** — the theme only supplies the page background and the
+    default text color; any text/background colors the book specifies are kept
+    as a matched pair.
+- **File ▸ Save Page… (Ctrl+S).** The reading view's context-menu "Save page"
+  is now also available from the File menu.
+
 ## [0.8.1] - 2026-09-08
 
 ### Fixed
@@ -729,42 +744,45 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
-[0.7.3]: https://github.com/fukuyori/Spindle/compare/v0.7.2...v0.7.3
-[0.7.2]: https://github.com/fukuyori/Spindle/compare/v0.7.1...v0.7.2
-[0.7.1]: https://github.com/fukuyori/Spindle/compare/v0.7.0...v0.7.1
-[0.7.0]: https://github.com/fukuyori/Spindle/compare/v0.6.6...v0.7.0
-[0.6.6]: https://github.com/fukuyori/Spindle/compare/v0.6.5...v0.6.6
-[0.6.5]: https://github.com/fukuyori/Spindle/compare/v0.6.4...v0.6.5
-[0.6.4]: https://github.com/fukuyori/Spindle/compare/v0.6.3...v0.6.4
-[0.6.3]: https://github.com/fukuyori/Spindle/compare/v0.6.2...v0.6.3
-[0.6.2]: https://github.com/fukuyori/Spindle/compare/v0.6.1...v0.6.2
-[0.6.1]: https://github.com/fukuyori/Spindle/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/fukuyori/Spindle/compare/v0.5.2...v0.6.0
-[0.5.2]: https://github.com/fukuyori/Spindle/compare/v0.5.1...v0.5.2
-[0.5.1]: https://github.com/fukuyori/Spindle/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/fukuyori/Spindle/compare/v0.4.5...v0.5.0
-[0.4.5]: https://github.com/fukuyori/Spindle/compare/v0.4.4...v0.4.5
-[0.4.4]: https://github.com/fukuyori/Spindle/compare/v0.4.3...v0.4.4
-[0.4.3]: https://github.com/fukuyori/Spindle/compare/v0.4.2...v0.4.3
-[0.4.2]: https://github.com/fukuyori/Spindle/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/fukuyori/Spindle/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/fukuyori/Spindle/compare/v0.3.5...v0.4.0
-[0.3.5]: https://github.com/fukuyori/Spindle/compare/v0.3.4...v0.3.5
-[0.3.4]: https://github.com/fukuyori/Spindle/compare/v0.3.3...v0.3.4
-[0.3.3]: https://github.com/fukuyori/Spindle/compare/v0.3.2...v0.3.3
-[0.3.2]: https://github.com/fukuyori/Spindle/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/fukuyori/Spindle/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/fukuyori/Spindle/compare/v0.2.8...v0.3.0
-[0.2.8]: https://github.com/fukuyori/Spindle/compare/v0.2.7...v0.2.8
-[0.2.7]: https://github.com/fukuyori/Spindle/compare/v0.2.6...v0.2.7
-[0.2.6]: https://github.com/fukuyori/Spindle/compare/v0.2.5...v0.2.6
-[0.2.5]: https://github.com/fukuyori/Spindle/compare/v0.2.4...v0.2.5
-[0.2.4]: https://github.com/fukuyori/Spindle/compare/v0.2.3...v0.2.4
-[0.2.3]: https://github.com/fukuyori/Spindle/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/fukuyori/Spindle/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/fukuyori/Spindle/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/fukuyori/Spindle/compare/v0.1.3...v0.2.0
-[0.1.3]: https://github.com/fukuyori/Spindle/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/fukuyori/Spindle/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/fukuyori/Spindle/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/fukuyori/Spindle/releases/tag/v0.1.0
+[0.9.0]: https://github.com/fukuyori/Spindle/compare/0.8.1...0.9.0
+[0.8.1]: https://github.com/fukuyori/Spindle/compare/0.8.0...0.8.1
+[0.8.0]: https://github.com/fukuyori/Spindle/compare/0.7.3...0.8.0
+[0.7.3]: https://github.com/fukuyori/Spindle/compare/0.7.2...0.7.3
+[0.7.2]: https://github.com/fukuyori/Spindle/compare/0.7.1...0.7.2
+[0.7.1]: https://github.com/fukuyori/Spindle/compare/0.7.0...0.7.1
+[0.7.0]: https://github.com/fukuyori/Spindle/compare/0.6.6...0.7.0
+[0.6.6]: https://github.com/fukuyori/Spindle/compare/0.6.5...0.6.6
+[0.6.5]: https://github.com/fukuyori/Spindle/compare/0.6.4...0.6.5
+[0.6.4]: https://github.com/fukuyori/Spindle/compare/0.6.3...0.6.4
+[0.6.3]: https://github.com/fukuyori/Spindle/compare/0.6.2...0.6.3
+[0.6.2]: https://github.com/fukuyori/Spindle/compare/0.6.1...0.6.2
+[0.6.1]: https://github.com/fukuyori/Spindle/compare/0.6.0...0.6.1
+[0.6.0]: https://github.com/fukuyori/Spindle/compare/0.5.2...0.6.0
+[0.5.2]: https://github.com/fukuyori/Spindle/compare/0.5.1...0.5.2
+[0.5.1]: https://github.com/fukuyori/Spindle/compare/0.5.0...0.5.1
+[0.5.0]: https://github.com/fukuyori/Spindle/compare/0.4.5...0.5.0
+[0.4.5]: https://github.com/fukuyori/Spindle/compare/0.4.4...0.4.5
+[0.4.4]: https://github.com/fukuyori/Spindle/compare/0.4.3...0.4.4
+[0.4.3]: https://github.com/fukuyori/Spindle/compare/0.4.2...0.4.3
+[0.4.2]: https://github.com/fukuyori/Spindle/compare/0.4.1...0.4.2
+[0.4.1]: https://github.com/fukuyori/Spindle/compare/0.4.0...0.4.1
+[0.4.0]: https://github.com/fukuyori/Spindle/compare/0.3.5...0.4.0
+[0.3.5]: https://github.com/fukuyori/Spindle/compare/0.3.4...0.3.5
+[0.3.4]: https://github.com/fukuyori/Spindle/compare/0.3.3...0.3.4
+[0.3.3]: https://github.com/fukuyori/Spindle/compare/0.3.2...0.3.3
+[0.3.2]: https://github.com/fukuyori/Spindle/compare/0.3.1...0.3.2
+[0.3.1]: https://github.com/fukuyori/Spindle/compare/0.3.0...0.3.1
+[0.3.0]: https://github.com/fukuyori/Spindle/compare/0.2.8...0.3.0
+[0.2.8]: https://github.com/fukuyori/Spindle/compare/0.2.7...0.2.8
+[0.2.7]: https://github.com/fukuyori/Spindle/compare/0.2.6...0.2.7
+[0.2.6]: https://github.com/fukuyori/Spindle/compare/0.2.5...0.2.6
+[0.2.5]: https://github.com/fukuyori/Spindle/compare/0.2.4...0.2.5
+[0.2.4]: https://github.com/fukuyori/Spindle/compare/0.2.3...0.2.4
+[0.2.3]: https://github.com/fukuyori/Spindle/compare/0.2.2...0.2.3
+[0.2.2]: https://github.com/fukuyori/Spindle/compare/0.2.1...0.2.2
+[0.2.1]: https://github.com/fukuyori/Spindle/compare/0.2.0...0.2.1
+[0.2.0]: https://github.com/fukuyori/Spindle/compare/0.1.3...0.2.0
+[0.1.3]: https://github.com/fukuyori/Spindle/compare/0.1.2...0.1.3
+[0.1.2]: https://github.com/fukuyori/Spindle/compare/v0.1.1...0.1.2
+[0.1.1]: https://github.com/fukuyori/Spindle/compare/0.1.0...v0.1.1
+[0.1.0]: https://github.com/fukuyori/Spindle/releases/tag/0.1.0

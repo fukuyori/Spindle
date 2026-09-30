@@ -83,6 +83,7 @@ private slots:
     void increaseFont();
     void decreaseFont();
     void setTheme(int theme); // Theme index: 0 light, 1 sepia, 2 dark
+    void setColorMode(int mode); // ColorMode index: 0 readable, 1 book colors
     void chooseFont();        // pick the body font (applies it too)
     void toggleXmlView(bool on);
     void onSearchTextChanged();
@@ -300,6 +301,13 @@ private:
     enum class TranslateView { Original, Bilingual, Translation };
     enum class SummaryDetail { Brief, Standard, Detailed };
     enum class WrapMode { WindowWidth, CharacterCount };
+    // How the theme treats the book's own colors.
+    //   Readable: every text takes the theme color; where the book paints its
+    //             own background (a dark heading band, a tinted box) reader.js
+    //             swaps in a color that keeps enough contrast on it.
+    //   Book:     the book's own text/background colors are kept as a set; the
+    //             theme only supplies the page background and default text.
+    enum class ColorMode { Readable, Book };
     struct BrightnessAdjust {
         int background = 0;
         int original = 0;
@@ -312,6 +320,7 @@ private:
     int m_currentChapter = -1;
     int m_fontSize = 100; // percent (zoom)
     Theme m_theme = Theme::Light;
+    ColorMode m_colorMode = ColorMode::Readable;
     BrightnessAdjust m_brightness[3];
     // Scanned-page legibility, 0 (off) to 100 each. Not per-theme: they
     // compensate for how the scan was made, not for the reading light.
@@ -486,6 +495,8 @@ private:
     QAction *m_fontOverride = nullptr;
     // 表示 > テーマ radio actions (indexes follow Theme).
     QAction *m_themeActs[3] = {nullptr, nullptr, nullptr};
+    QAction *m_colorModeActs[2] = {nullptr, nullptr};
+    QAction *m_savePageAction = nullptr; // ファイル > ページを保存…
     QLabel *m_titleLabel = nullptr;
     QLabel *m_authorLabel = nullptr;
     QLabel *m_location = nullptr;

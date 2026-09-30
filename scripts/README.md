@@ -13,8 +13,8 @@ Cross-platform helpers. All output packages land in `dist/`.
 | `codesign-windows.ps1` | Windows | (helper) Authenticode signing, dot-sourced by the two above |
 
 Every package is named `Spindle-<version>-<os>-<arch>.<ext>`, e.g.
-`Spindle-0.8.1-windows-x64.exe`, `Spindle-0.8.1-macos-arm64.dmg`,
-`Spindle-0.8.1-linux-x86_64.AppImage`. The architecture is the one the binary
+`Spindle-0.9.0-windows-x64.exe`, `Spindle-0.9.0-macos-arm64.dmg`,
+`Spindle-0.9.0-linux-x86_64.AppImage`. The architecture is the one the binary
 was actually built for (read from the PE header / `lipo`), not the host's.
 
 ## Prerequisites
