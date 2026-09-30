@@ -45,8 +45,10 @@ number with no `v` prefix (`0.9.0`); the only exception in history is the early
 `v0.1.1`, which the `CHANGELOG.md` compare links refer to by that name.
 
 `.github/workflows/build.yml` builds and packages all three platforms on every
-push and PR; a tag matching `<major>.<minor>.<patch>` additionally publishes a
-GitHub Release with every package attached.
+push and PR; a tag matching `<major>.<minor>.<patch>` additionally creates (or
+updates) the GitHub Release and attaches the **Linux** `.AppImage` and `.deb`.
+The Windows and macOS packages are not attached by CI: they are signed (and
+notarized) by hand and uploaded to the same release.
 
 ```sh
 git tag 0.9.0 && git push origin 0.9.0
@@ -55,12 +57,11 @@ git tag 0.9.0 && git push origin 0.9.0
 Also add the `[<version>]: .../compare/<previous>...<version>` link at the
 bottom of `CHANGELOG.md`.
 
-The packages CI produces are unsigned. The release job never overwrites a file
-of the same name that is already attached (`overwrite_files: false`) and keeps
-an existing release body, so signed packages uploaded by hand survive it. If CI
-attaches first, delete its unsigned file of the same name before uploading the
-signed one. A signed Windows build has to be made on a machine that holds the
-certificate:
+The release job never overwrites a file of the same name that is already
+attached (`overwrite_files: false`) and keeps an existing release body, so the
+order does not matter: the release may be created by hand first or by CI. When
+CI creates it, the body is empty — fill it from `CHANGELOG.md`. A signed
+Windows build has to be made on a machine that holds the certificate:
 
 ```powershell
 pwsh scripts/package-windows-inno.ps1 -Sign
