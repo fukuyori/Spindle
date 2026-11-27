@@ -4719,25 +4719,12 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         }
         break;
     case QEvent::KeyPress:
-        // Fixed-layout pages often have a native width larger than the render
-        // widget. Chromium normally consumes the first arrow key to scroll
-        // that overflow. Page navigation owns Left/Right in this mode, so
-        // intercept before the internal render widget sees the key.
-        if (readerEvent && currentChapterFixedLayout()) {
-            auto *ke = static_cast<QKeyEvent *>(event);
-            if (ke->modifiers() == Qt::NoModifier) {
-                // Right-bound books read right-to-left: Left advances,
-                // Right goes back (matches the edge-click mapping).
-                if (ke->key() == Qt::Key_Right) {
-                    requestPageTurn(rightBinding() ? -1 : 1);
-                    return true;
-                }
-                if (ke->key() == Qt::Key_Left) {
-                    requestPageTurn(rightBinding() ? 1 : -1);
-                    return true;
-                }
-            }
-        }
+        // The keys that navigate or page (see handleReaderKey) are taken before
+        // the render widget sees them: Chromium would otherwise spend them on
+        // scrolling whatever overflow the page has. Keys left to Chromium
+        // (plain scrolling) fall through.
+        if (readerEvent && handleReaderKey(static_cast<QKeyEvent *>(event)))
+            return true;
         break;
     case QEvent::MouseButtonPress:
         if (readerEvent && currentChapterFixedLayout() && m_readerContainer) {
@@ -4825,6 +4812,22 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
                     increaseFont();
                 else if (we->angleDelta().y() < 0)
                     decreaseFont();
+                return true;
+            }
+            // A fixed-layout page has nothing to scroll at fit size, so the
+            // plain wheel zooms the canvas (turning up zooms in). Deltas are
+            // accumulated so a high-resolution wheel or a touchpad steps once
+            // per notch-worth of travel rather than once per event.
+            if (readerEvent && m_fixedCanvas) {
+                m_fixedWheelZoomAccum += we->angleDelta().y();
+                while (m_fixedWheelZoomAccum >= QWheelEvent::DefaultDeltasPerStep) {
+                    m_fixedWheelZoomAccum -= QWheelEvent::DefaultDeltasPerStep;
+                    increaseFont();
+                }
+                while (m_fixedWheelZoomAccum <= -QWheelEvent::DefaultDeltasPerStep) {
+                    m_fixedWheelZoomAccum += QWheelEvent::DefaultDeltasPerStep;
+                    decreaseFont();
+                }
                 return true;
             }
         }
@@ -5514,27 +5517,129 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         m_searchInput->selectAll();
         return;
     }
-    if (!m_book) {
-        QMainWindow::keyPressEvent(event);
+    // Reached when the reader does not have focus, or when Chromium handed a
+    // key it did not use back to us. Keys Chromium scrolls with (Up/Down in
+    // horizontal reflow, Left/Right in vertical reflow) are deliberately not
+    // turned into chapter changes here, so scrolling never crosses a chapter.
+    if (handleReaderKey(event))
         return;
+    QMainWindow::keyPressEvent(event);
+}
+
+// Keyboard map of the reading area. Which way the text runs decides it:
+//
+//   reflowable, horizontal   Up/Down scroll (Chromium)   Right/Left next/previous chapter
+//   reflowable, vertical     Up/Down previous/next chapter   Right/Left scroll (Chromium)
+//   fixed, horizontal        Up/Down pan the zoomed canvas   Right/Left next/previous page
+//   fixed, vertical          Up/Down previous/next page   Right/Left pan the zoomed canvas
+//
+// Space / Shift+Space page forward / back: in a reflowable chapter they scroll
+// by a screenful within the chapter (never crossing into the next one), on a
+// fixed-layout page they turn the page. Returns true when the key was used.
+bool MainWindow::handleReaderKey(QKeyEvent *event)
+{
+    if (!m_book || !event)
+        return false;
+    const Qt::KeyboardModifiers mods = event->modifiers() & ~Qt::KeypadModifier;
+    const int key = event->key();
+    const bool shiftSpace = key == Qt::Key_Space && mods == Qt::ShiftModifier;
+    if (mods != Qt::NoModifier && !shiftSpace)
+        return false;
+
+    if (currentChapterFixedLayout() && !m_xmlView) {
+        const bool vertical = fixedPageVerticalWriting();
+        switch (key) {
+        case Qt::Key_Space:
+            requestPageTurn(shiftSpace ? -1 : 1);
+            return true;
+        case Qt::Key_Up:
+            if (vertical)
+                requestPageTurn(-1);
+            else
+                panFixedCanvasStep(0, 1);
+            return true;
+        case Qt::Key_Down:
+            if (vertical)
+                requestPageTurn(1);
+            else
+                panFixedCanvasStep(0, -1);
+            return true;
+        case Qt::Key_Right:
+            if (vertical)
+                panFixedCanvasStep(-1, 0);
+            else
+                requestPageTurn(1);
+            return true;
+        case Qt::Key_Left:
+            if (vertical)
+                panFixedCanvasStep(1, 0);
+            else
+                requestPageTurn(-1);
+            return true;
+        default:
+            return false;
+        }
     }
-    switch (event->key()) {
-    case Qt::Key_Right:
-        if (currentChapterFixedLayout())
-            requestPageTurn(rightBinding() ? -1 : 1);
-        else
-            nextChapter();
-        break;
+
+    const bool vertical = m_currentPageVerticalWriting && !m_xmlView;
+    switch (key) {
     case Qt::Key_Space:
+        scrollReflowPage(shiftSpace ? -1 : 1);
+        return true;
+    case Qt::Key_Up:
+        if (!vertical)
+            return false;
+        previousChapter();
+        return true;
+    case Qt::Key_Down:
+        if (!vertical)
+            return false;
         nextChapter();
-        break;
+        return true;
+    case Qt::Key_Right:
+        if (vertical)
+            return false;
+        nextChapter();
+        return true;
     case Qt::Key_Left:
-        if (currentChapterFixedLayout())
-            requestPageTurn(rightBinding() ? 1 : -1);
-        else
-            previousChapter();
-        break;
+        if (vertical)
+            return false;
+        previousChapter();
+        return true;
     default:
-        QMainWindow::keyPressEvent(event);
+        return false;
     }
+}
+
+// A fixed-layout page counts as vertical when its text is written vertically
+// or the book declares right-to-left page progression (image-only pages have
+// no writing mode of their own to detect).
+bool MainWindow::fixedPageVerticalWriting() const
+{
+    return m_currentPageVerticalWriting || (m_book && m_book->verticalRtl());
+}
+
+// Moves the zoomed fixed-layout canvas one arrow-key step. dx/dy give the
+// direction the sheet itself moves (+1 = right/down); layoutFixedCanvas clamps
+// it, so at fit size, where nothing overflows, this does nothing.
+void MainWindow::panFixedCanvasStep(int dx, int dy)
+{
+    if (!m_fixedCanvas || !m_readerContainer || !fixedCanvasPannable())
+        return;
+    const double stepX = qMax(40.0, m_readerContainer->width() * 0.1);
+    const double stepY = qMax(40.0, m_readerContainer->height() * 0.1);
+    m_fixedCanvasPan += QPointF(dx * stepX, dy * stepY);
+    layoutFixedCanvas();
+}
+
+// Scrolls a reflowable chapter by a screenful (direction +1 = towards its end).
+// reader.js picks the axis from the page's writing mode.
+void MainWindow::scrollReflowPage(int direction)
+{
+    if (!m_view)
+        return;
+    m_view->page()->runJavaScript(
+        QStringLiteral("window.__spindleScrollPage&&window.__spindleScrollPage(%1)")
+            .arg(direction > 0 ? 1 : -1),
+        QWebEngineScript::ApplicationWorld);
 }

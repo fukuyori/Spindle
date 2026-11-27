@@ -10,11 +10,10 @@ Cross-platform helpers. All output packages land in `dist/`.
 | `package-linux.sh` | Linux | `.AppImage` + `.deb` / `.tar.gz` |
 | `package-windows.ps1` | Windows | portable `.zip` |
 | `package-windows-inno.ps1` | Windows | Inno Setup installer `.exe` |
-| `codesign-windows.ps1` | Windows | (helper) Authenticode signing, dot-sourced by the two above |
 
 Every package is named `Spindle-<version>-<os>-<arch>.<ext>`, e.g.
-`Spindle-0.9.0-windows-x64.exe`, `Spindle-0.9.0-macos-arm64.dmg`,
-`Spindle-0.9.0-linux-x86_64.AppImage`. The architecture is the one the binary
+`Spindle-0.9.1-windows-x64.exe`, `Spindle-0.9.1-macos-arm64.dmg`,
+`Spindle-0.9.1-linux-x86_64.AppImage`. The architecture is the one the binary
 was actually built for (read from the PE header / `lipo`), not the host's.
 
 ## Prerequisites
@@ -33,7 +32,7 @@ was actually built for (read from the PE header / `lipo`), not the host's.
 ## Examples
 
 ```sh
-# macOS — build, sign, notarize, staple, and package a .dmg
+# macOS — build and package a .dmg
 ./scripts/package-macos.sh
 
 # Linux — AppImage + .deb (downloads linuxdeploy on first run)
@@ -47,32 +46,7 @@ pwsh scripts/build.ps1 -QtPrefix C:\Qt\6.8.0\msvc2022_64
 
 pwsh scripts/package-windows.ps1        # portable zip
 pwsh scripts/package-windows-inno.ps1   # Inno Setup installer
-
-# ...and with Authenticode signatures on the executables, the installer
-# and the uninstaller
-$env:CODESIGN_CERT = "My Publisher Name"
-pwsh scripts/package-windows-inno.ps1 -Sign
 ```
-
-## Windows code signing (`-Sign`)
-
-Both Windows packaging scripts take `-Sign`. It signs the staged executables,
-and `package-windows-inno.ps1` additionally signs the installer and the
-uninstaller (through Inno Setup's `SignTool` / `SignedUninstaller`). Binaries
-somebody else already signed — Qt's `QtWebEngineProcess.exe`, Microsoft's `vc_redist.x64.exe`
-— are left untouched, because `signtool` replaces a signature rather than
-appending one.
-
-| Variable | Meaning |
-|----------|---------|
-| `CODESIGN_CERT` | **Required.** A `.pfx`/`.p12` path, a 40-char SHA1 thumbprint, or a certificate subject name |
-| `CODESIGN_PASSWORD` | Password for a `.pfx`/`.p12` |
-| `CODESIGN_TIMESTAMP_URL` | RFC 3161 timestamp server (default `http://timestamp.digicert.com`) |
-| `CODESIGN_DIGEST` | Digest algorithm (default `sha256`) |
-| `SIGNTOOL_EXE` | Path to `signtool.exe`, if it is neither on PATH nor in the Windows SDK |
-
-Only the staged copies under `dist\Spindle` are signed, never the build tree, so
-a later rebuild cannot ship a stale signature.
 
 ## Notes
 
@@ -82,12 +56,6 @@ a later rebuild cannot ship a stale signature.
 - Windows packaging scripts first deploy the Qt runtime into the build output
   directory, then stage that deployed build output for ZIP / Inno Setup
   packaging.
-- macOS packaging signs with a Developer ID Application identity when one is
-  available, submits the `.dmg` with `xcrun notarytool` using the
-  configured keychain profile (or an auto-detected `notarytool`, `spindle`, or
-  `notary` profile), staples the accepted ticket, and verifies it. Apple ID,
-  team ID, and app-specific-password environment variables are also supported.
-  Set `SKIP_NOTARIZE=1` only for a local, non-notarized package.
 - `package-windows-inno.ps1` requires Inno Setup 6 (`ISCC.exe`) on PATH, in the
   default install location, or passed via `-InnoCompiler`.
 - CPack generators are also configured in `CMakeLists.txt`, so from a build

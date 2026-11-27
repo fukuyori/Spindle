@@ -1403,6 +1403,46 @@
     return true;
   };
 
+  // --- reflowable chapter scrolling -----------------------------------------
+  // Vertical writing scrolls sideways, but a mouse wheel only turns up and
+  // down, and Chromium does not translate one into the other. Map the wheel
+  // onto the horizontal axis: the turn that moves a horizontal page towards
+  // its end moves a vertical (right-to-left) page left, towards its end. The
+  // delta already reflects the OS scroll-direction setting, so it is used as
+  // is. Ctrl+wheel is zoom and never reaches here (C++ swallows it).
+  var verticalWritingCache = null;
+  function reflowVertical() {
+    if (verticalWritingCache === null) verticalWritingCache = pageUsesVerticalWriting();
+    return verticalWritingCache;
+  }
+  function pageScroller() {
+    return document.scrollingElement || document.documentElement;
+  }
+  window.addEventListener("wheel", function (e) {
+    if (e.ctrlKey || fixedLayoutPage || imageView || !e.deltaY || !reflowVertical()) return;
+    var el = pageScroller();
+    if (!el) return;
+    var unit = e.deltaMode === 1 ? 40 : (e.deltaMode === 2 ? el.clientWidth : 1);
+    el.scrollBy({ left: (e.deltaX - e.deltaY) * unit });
+    e.preventDefault();
+  }, { passive: false });
+
+  // Space / Shift+Space from C++: one screenful towards the chapter's end
+  // (dir 1) or start (dir -1), along the axis the text flows. Stops at the
+  // chapter edge; moving to another chapter is left to explicit navigation.
+  // The step follows Chromium's own paging: 87.5% of the view, overlapping by
+  // at most 40px.
+  window.__spindleScrollPage = function (dir) {
+    var el = pageScroller();
+    if (!el) return false;
+    function step(len) { return Math.max(len * 0.875, len - 40, 1); }
+    if (reflowVertical())
+      el.scrollBy({ left: -dir * step(el.clientWidth) });
+    else
+      el.scrollBy({ top: dir * step(el.clientHeight) });
+    return true;
+  };
+
   if (typeof QWebChannel !== "undefined" && typeof qt !== "undefined" && qt.webChannelTransport) {
     init();
   } else {

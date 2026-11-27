@@ -4,6 +4,28 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-11-27
+
+### Changed
+- **Arrow keys, Space and the mouse wheel follow the direction the text runs.**
+  - Reflowable, horizontal: ↑/↓ scroll, →/← go to the next/previous chapter.
+  - Reflowable, vertical: ↑/↓ go to the previous/next chapter, →/← scroll
+    sideways, and the mouse wheel now scrolls sideways too (turning the wheel
+    the way that scrolls a horizontal page down moves a vertical page left,
+    towards its end; the OS scroll-direction setting is respected).
+  - Fixed layout, horizontal: →/← turn to the next/previous page, ↑/↓ move a
+    zoomed page up and down.
+  - Fixed layout, vertical: ↑/↓ turn to the previous/next page, →/← move a
+    zoomed page sideways. A fixed-layout page counts as vertical when its text
+    is written vertically or the book's page progression is right-to-left;
+    the arrow keys no longer follow the binding setting (clicking the page
+    edges still does).
+- **Space / Shift+Space page forward / back.** In a reflowable chapter they
+  scroll a screenful within the chapter and no longer jump to the next chapter
+  at its end; on a fixed-layout page they turn to the next / previous page.
+- **The mouse wheel zooms fixed-layout pages** without holding Ctrl (turn up to
+  zoom in). Ctrl+wheel keeps working as before.
+
 ## [0.9.0] - 2026-09-30
 
 ### Added
@@ -744,6 +766,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.9.1]: https://github.com/fukuyori/Spindle/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/fukuyori/Spindle/compare/0.8.1...0.9.0
 [0.8.1]: https://github.com/fukuyori/Spindle/compare/0.8.0...0.8.1
 [0.8.0]: https://github.com/fukuyori/Spindle/compare/0.7.3...0.8.0

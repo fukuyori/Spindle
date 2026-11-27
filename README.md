@@ -26,8 +26,7 @@ Prebuilt packages are published on the
 `<arch>` is the architecture the package was actually built for — `arm64` on
 Apple Silicon, for instance.
 
-> The packages are unsigned, so Windows SmartScreen and macOS Gatekeeper warn
-> on first launch. To build from source instead, see [Build](#build).
+To build from source instead, see [Build](#build).
 
 ## Features
 
@@ -42,18 +41,21 @@ Apple Silicon, for instance.
   vertical & horizontal layouts, publisher CSS, embedded fonts and images.
 - **Fixed-layout EPUBs** — fit the complete page to the reading pane without
   changing its aspect ratio; optional facing-page spreads honor left/right
-  progression and page-placement metadata. Left/Right turns on the first key
-  press, and clicking the outer 15% of the page turns in that direction. The
+  progression and page-placement metadata. The arrow keys turn on the first key
+  press (Left/Right for horizontal writing, Up/Down for vertical), and clicking
+  the outer 15% of the page turns in that direction. The
   first spine page is always shown alone as the cover. Binding can be automatic,
   right-bound, or left-bound; automatic uses right binding for vertical writing.
-  **A−/A+ and Ctrl+mouse wheel zoom the page**, and anything past the edge of the
-  window can be dragged into view. A spread behaves as one sheet: both halves
+  **The mouse wheel, A−/A+ and Ctrl+mouse wheel zoom the page**, and anything
+  past the edge of the window can be dragged, or moved with the arrow keys, into
+  view. A spread behaves as one sheet: both halves
   zoom and pan together and stay joined at the spine, which travels with them.
   Turning the page starts fitted again.
 - **Reading controls** — chapter navigation, font zoom, a font picker that can
   override the book's own fonts, line wrapping by window width or a chosen
-  character count, light / sepia / dark themes, and a collapsible table-of-contents
-  sidebar. The theme, window size, translation view, and wrapping preference are
+  character count, light / sepia / dark themes with a choice of how the book's
+  own colors are handled, a collapsible table-of-contents sidebar, and saving the
+  current page. The theme, window size, translation view, and wrapping preference are
   restored on the next launch. The 8 most recently opened EPUBs can be shown in
   the left pane for quick reopening. History entries remember the last-opened
   chapter, and after one is opened the pane stays visible and switches back to
@@ -111,7 +113,8 @@ Apple Silicon, for instance.
   [VOICEVOX](https://voicevox.hiroshiba.jp) server (Japanese) and local
   [Piper](https://github.com/rhasspy/piper) voice models (multi-language) can
   be selected per language in **Read Aloud → Voice Settings…**. The current
-  chapter can also be exported to a WAV audio file with the same voices.
+  chapter can also be exported to a WAV / MP3 / M4A audio file with the same
+  voices.
 - **XHTML source view** — toggle the current chapter between the rendered view
   and its raw markup.
 - **Comfortable reading margins** and a collapsible sidebar.
@@ -128,16 +131,42 @@ in a new window, so you can read several at once.
 
 | Action | Shortcut |
 |--------|----------|
-| Next chapter / fixed-layout page | `Space` / `→` |
-| Previous chapter / fixed-layout page | `←` |
+| Save page | `Cmd` / `Ctrl` + `S` |
 | Focus search | `Cmd` / `Ctrl` + `F` |
 | Read aloud / pause | `Ctrl` + `Shift` + `S` |
+
+In the reading area, the keys and the mouse wheel depend on the kind of chapter
+and the direction the text runs:
+
+| Input | Reflowable, horizontal | Reflowable, vertical | Fixed, horizontal | Fixed, vertical |
+|-------|------------------------|----------------------|-------------------|-----------------|
+| `↑` / `↓` | scroll up / down | previous / next chapter | move a zoomed page up / down | previous / next page |
+| `→` / `←` | next / previous chapter | scroll right / left | next / previous page | move a zoomed page right / left |
+| `Space` / `Shift` + `Space` | scroll down / up a screenful | scroll left / right a screenful | next / previous page | next / previous page |
+| Mouse wheel | scroll up / down | scroll left / right | zoom in / out | zoom in / out |
+| `Ctrl` + mouse wheel | text larger / smaller | text larger / smaller | zoom in / out | zoom in / out |
+
+- In a reflowable chapter, scrolling and `Space` stay within the chapter; they
+  never move on to the next one.
+- In vertical writing, the wheel turn that scrolls a horizontal page down moves
+  the page left, towards the end of the chapter. The direction follows the OS
+  scroll-direction setting.
+- A fixed-layout page is treated as vertical when its text is written
+  vertically or the book's page progression is right-to-left. Turning the page
+  resets the zoom.
 
 - **UI language:** **View → Language / 言語** switches between Automatic
   (follow the system), 日本語, and English; the choice applies after a restart.
 - **Sidebar:** toggle the left pane with **Sidebar**. Use **History** to show the
   recent EPUB list in that pane; opening a history item keeps the pane visible
-  and switches it back to the table of contents.
+  and switches it back to the table of contents. **File → Recent EPUBs** opens
+  them too.
+- **Theme and colors:** **View → Theme** picks light / sepia / dark. The same
+  menu chooses how the book's own colors are handled: **Prioritize Readability
+  (Auto-Correct Colors)** (the default) gives text the theme color and switches
+  it to a readable color where the book paints its own background; **Use Book
+  Colors** keeps the text and background colors the book specifies.
+- **Save page:** **File → Save Page…** (`Ctrl+S`) saves the page being shown.
 - **Display adjustments:** choose **View → Display Adjustments…** to adjust the
   current theme, or select another theme in the dialog. Background, original
   text, and translated text are saved separately for each theme. The same
@@ -150,8 +179,9 @@ in a new window, so you can read several at once.
 - **Fixed layout:** use **View → Fixed-Layout Facing Pages** to toggle spreads,
   and **View → Fixed-Layout Binding Direction** to choose automatic, right-bound,
   or left-bound. Binding is saved per EPUB in Spindle's settings; the EPUB file
-  itself is never modified. Zoom with **A−/A+** or **Ctrl+mouse wheel**, then
-  drag to move around a page larger than the window.
+  itself is never modified. Zoom with the **mouse wheel**, **A−/A+** or
+  **Ctrl+mouse wheel**, then drag or use the arrow keys to move around a page
+  larger than the window.
 - **Highlight:** select text → pick a colour from the popup (which also offers
   Copy, Translate, Summarize, and Search the web). Click an existing highlight
   to copy it, search it on the web, change its colour, edit its note, or delete it.
@@ -317,10 +347,8 @@ pwsh scripts/package-windows.ps1        # → portable .zip
 pwsh scripts/package-windows-inno.ps1   # → Inno Setup installer .exe
 ```
 
-Packages are named `Spindle-<version>-<os>-<arch>.<ext>`. On Windows, add
-`-Sign` (with `CODESIGN_CERT` set to a `.pfx` path, a certificate thumbprint or
-a subject name) to Authenticode-sign the executables, the installer and the
-uninstaller — see [`scripts/README.md`](scripts/README.md).
+Packages are named `Spindle-<version>-<os>-<arch>.<ext>` — see
+[`scripts/README.md`](scripts/README.md).
 
 The deploy tools bundle the Qt WebEngine runtime so the app is self-contained.
 
@@ -329,13 +357,7 @@ The deploy tools bundle the Qt WebEngine runtime so the app is self-contained.
 > (the packaged `.app` can render blank). For a distributable macOS build,
 > install Qt from the [official installer](https://www.qt.io/download-qt-installer)
 > or `aqtinstall` and run `CMAKE_PREFIX_PATH=/path/to/Qt/6.x/macos ./scripts/package-macos.sh`.
-> The same applies on Windows/Linux: use a complete Qt kit. On macOS,
-> `package-macos.sh` signs with a Developer ID Application certificate when
-> available, submits the `.dmg` with `xcrun notarytool` using the
-> configured or automatically detected keychain profile, and staples the
-> accepted ticket. Apple ID credentials can also be supplied through the
-> documented environment variables. Set
-> `SKIP_NOTARIZE=1` only when building a local, non-notarized package.
+> The same applies on Windows/Linux: use a complete Qt kit.
 
 ## Project layout
 
@@ -351,7 +373,7 @@ src/
 └── ui/      main window (QWebEngineView reader + sidebar/toolbar)
 resources/   reader.js (injected), app icon, Qt resource file
 i18n/        UI translation catalog (spindle_en.ts; source strings are Japanese)
-packaging/   Linux .desktop entry
+packaging/   Linux .desktop entry, Debian package scripts
 scripts/     build & packaging scripts (see scripts/README.md)
 third_party/ vendored miniz
 ```

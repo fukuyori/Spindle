@@ -194,6 +194,12 @@ private:
     bool m_fixedPanDragging = false;
     QPoint m_fixedPanDragOrigin;
     QPointF m_fixedPanDragStart;
+    int m_fixedWheelZoomAccum = 0; // wheel travel not yet turned into a zoom step
+    // --- reading-area keys (see handleReaderKey) ----------------------------
+    bool handleReaderKey(QKeyEvent *event);
+    bool fixedPageVerticalWriting() const;
+    void panFixedCanvasStep(int dx, int dy);
+    void scrollReflowPage(int direction);
     // Last-applied injected-script state, kept to avoid rewriting the script
     // collections during navigation (see updateThemeScript).
     QString m_lastThemeScriptCss;
