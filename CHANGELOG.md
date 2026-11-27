@@ -4,6 +4,24 @@ All notable changes to Spindle (C++ / Qt) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-11-28
+
+### Changed
+- **Bilingual EPUB exports mark each chapter's `<html>` with the target
+  language**, as translation-only exports already did, matching the package
+  language the export sets. The translation paragraphs inherit it and no
+  longer carry a `lang` of their own; the original paragraphs instead state
+  the source language (the chapter's original `<html>` language, else the
+  book's), unless the book already gave them one.
+
+### Fixed
+- **Bilingual EPUB exports show their translations again.** Such a book is in
+  the target language, so its view is locked to 原文 — and 原文 view hid the
+  translations the export had embedded, leaving only the original text. The
+  embedded translations are now part of the book's own text and stay visible
+  in every view mode, in the translation color; only the translations Spindle
+  inserts while reading are switched by 原文 / 対訳 / 訳文.
+
 ## [0.9.1] - 2026-11-27
 
 ### Changed
@@ -766,6 +784,7 @@ Initial release of Spindle, a native EPUB reader built with C++ and Qt.
   `.deb`, Windows `.zip` / NSIS / Inno Setup installers) and a GitHub Actions
   release workflow.
 
+[0.9.2]: https://github.com/fukuyori/Spindle/compare/0.9.1...0.9.2
 [0.9.1]: https://github.com/fukuyori/Spindle/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/fukuyori/Spindle/compare/0.8.1...0.9.0
 [0.8.1]: https://github.com/fukuyori/Spindle/compare/0.8.0...0.8.1

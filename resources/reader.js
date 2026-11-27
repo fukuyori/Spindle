@@ -314,6 +314,9 @@
       "body.sv-bilingual .spindle-translation{" +
       "margin-block-start:0.3em !important;margin-block-end:1.1em !important;}" +
       "body.sv-bilingual .spindle-source{margin-block-end:0.3em !important;}" +
+      // Only translations inserted here are hidden: ones a bilingual EPUB
+      // export carries are served as .spindle-embedded-translation (see
+      // BlockIndex injectBlockIds) and stay visible as part of the book.
       "body.sv-original .spindle-translation{display:none;}" +
       "body.sv-translation .spindle-source{display:none;}";
   }

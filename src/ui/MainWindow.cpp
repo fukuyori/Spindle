@@ -1983,7 +1983,9 @@ QString MainWindow::viewStyleCss() const
         // keeps its own text/background pair, so the two stay matched.
         css = QStringLiteral(
                   "html,body{background:%1 !important;color:%2 !important;}"
-                  ".spindle-translation,.spindle-translation *{color:%3 !important;}")
+                  ".spindle-translation,.spindle-translation *,"
+                  ".spindle-embedded-translation,.spindle-embedded-translation *"
+                  "{color:%3 !important;}")
                   .arg(bg, original, translation);
     } else {
         // Every text takes the theme color. The book's own element backgrounds
@@ -1995,7 +1997,9 @@ QString MainWindow::viewStyleCss() const
                   "html{--spindle-color-mode:readable;}"
                   "html,body{background:%1 !important;}"
                   "body,body *{color:%2 !important;}"
-                  ".spindle-translation,.spindle-translation *{color:%3 !important;}"
+                  ".spindle-translation,.spindle-translation *,"
+                  ".spindle-embedded-translation,.spindle-embedded-translation *"
+                  "{color:%3 !important;}"
                   ".spindle-contrast,.spindle-contrast *{"
                   "color:var(--spindle-contrast-color) !important;}")
                   .arg(bg, original, translation);

@@ -44,7 +44,10 @@ ChapterScan scanChapter(const QString &xhtml);
 
 // Return the chapter XHTML with data-spindle-block="N" added to each leaf block,
 // and active content stripped (<script>, on* handlers, javascript: URLs — book
-// scripting is not supported). When themeCss is non-empty a
+// scripting is not supported). Translations already embedded in the book (a
+// Spindle bilingual export) are re-classed from spindle-translation to
+// spindle-embedded-translation, so the view mode never hides them — only the
+// translations reader.js inserts are switched. When themeCss is non-empty a
 // <style id="__spindle_theme"> element carrying it is embedded (end of <head>),
 // so the served document paints with the reader theme on its very first frame.
 // Returns an empty string if the XHTML won't parse (the caller must then scrub

@@ -12,8 +12,8 @@ Cross-platform helpers. All output packages land in `dist/`.
 | `package-windows-inno.ps1` | Windows | Inno Setup installer `.exe` |
 
 Every package is named `Spindle-<version>-<os>-<arch>.<ext>`, e.g.
-`Spindle-0.9.1-windows-x64.exe`, `Spindle-0.9.1-macos-arm64.dmg`,
-`Spindle-0.9.1-linux-x86_64.AppImage`. The architecture is the one the binary
+`Spindle-0.9.2-windows-x64.exe`, `Spindle-0.9.2-macos-arm64.dmg`,
+`Spindle-0.9.2-linux-x86_64.AppImage`. The architecture is the one the binary
 was actually built for (read from the PE header / `lipo`), not the host's.
 
 ## Prerequisites

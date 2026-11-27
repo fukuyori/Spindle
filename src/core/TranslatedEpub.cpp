@@ -106,12 +106,41 @@ QByteArray setOpfLanguage(const QString &opfXml, const QString &lang)
     return doc.toByteArray(0);
 }
 
-QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCache &cache)
+// The language the chapter is written in: its <html> xml:lang / lang, else the
+// book's package language.
+QString sourceLanguage(const QDomDocument &doc, const QString &bookLang)
+{
+    const QDomElement html = doc.documentElement();
+    if (!html.isNull()) {
+        for (const QString &attr : {QStringLiteral("xml:lang"), QStringLiteral("lang")}) {
+            const QString v = html.attribute(attr).trimmed();
+            if (!v.isEmpty())
+                return v;
+        }
+    }
+    return bookLang.trimmed();
+}
+
+void setLang(QDomElement &el, const QString &lang)
+{
+    el.setAttribute(QStringLiteral("xml:lang"), lang);
+    el.setAttribute(QStringLiteral("lang"), lang);
+}
+
+bool hasOwnLang(const QDomElement &el)
+{
+    return el.hasAttribute(QStringLiteral("xml:lang")) || el.hasAttribute(QStringLiteral("lang"));
+}
+
+QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCache &cache,
+                            const QString &bookLang)
 {
     QDomDocument doc = parse(xhtml);
     QDomElement body = bodyOf(doc);
     if (body.isNull())
         return xhtml.toUtf8();
+    // Read before <html> is re-marked with the target language below.
+    const QString srcLang = sourceLanguage(doc, bookLang);
 
     // Same bare-text wrapping as the reading view, so cache keys line up.
     block_index::normalizeBareText(body);
@@ -122,8 +151,16 @@ QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCa
         QString src;
         appendText(block, src);
         const QString tr = cache.lookup(src);
-        if (tr.isEmpty())
+        // Bilingual: <html> carries the target language, so every original
+        // block (translated or not) states the source language itself, unless
+        // the book already gave it one.
+        const bool markSource =
+            mode == Mode::Bilingual && !srcLang.isEmpty() && !hasOwnLang(block);
+        if (tr.isEmpty()) {
+            if (markSource)
+                setLang(block, srcLang);
             continue; // leave untranslated blocks as-is
+        }
 
         if (mode == Mode::Translation) {
             while (!block.firstChild().isNull())
@@ -134,6 +171,9 @@ QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCa
                  // original's formatting (headings, classes, inline styles).
             QDomElement p = block.cloneNode(false).toElement();
             p.removeAttribute(QStringLiteral("id"));
+            // The translation inherits the target language from <html>.
+            p.removeAttribute(QStringLiteral("xml:lang"));
+            p.removeAttribute(QStringLiteral("lang"));
             const QString cls = p.attribute(QStringLiteral("class"));
             p.setAttribute(QStringLiteral("class"),
                            cls.isEmpty() ? QStringLiteral("spindle-translation")
@@ -153,10 +193,8 @@ QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCa
                 blockStyle += QLatin1Char(';');
             block.setAttribute(QStringLiteral("style"),
                                blockStyle + QStringLiteral("margin-block-end:0.3em;"));
-            if (!cache.lang().isEmpty()) {
-                p.setAttribute(QStringLiteral("xml:lang"), cache.lang());
-                p.setAttribute(QStringLiteral("lang"), cache.lang());
-            }
+            if (markSource)
+                setLang(block, srcLang);
             p.appendChild(doc.createTextNode(tr));
             QDomNode parent = block.parentNode();
             if (!parent.isNull())
@@ -164,13 +202,12 @@ QByteArray transformChapter(const QString &xhtml, Mode mode, const TranslationCa
         }
     }
 
-    // Translation-only output is in the target language — mark the document.
-    if (mode == Mode::Translation && !cache.lang().isEmpty()) {
+    // The exported book is a target-language book (its OPF language is set to
+    // the target too), in both modes — mark the document.
+    if (!cache.lang().isEmpty()) {
         QDomElement html = doc.documentElement();
-        if (!html.isNull()) {
-            html.setAttribute(QStringLiteral("xml:lang"), cache.lang());
-            html.setAttribute(QStringLiteral("lang"), cache.lang());
-        }
+        if (!html.isNull())
+            setLang(html, cache.lang());
     }
 
     return doc.toByteArray(0);
@@ -249,7 +286,7 @@ bool write(const EpubBook &book, const QString &srcPath, const QString &outPath,
         mz_free(data);
 
         if (chapterPaths.contains(name))
-            bytes = transformChapter(QString::fromUtf8(bytes), mode, cache);
+            bytes = transformChapter(QString::fromUtf8(bytes), mode, cache, book.language());
         else if (name.endsWith(QLatin1String(".opf"), Qt::CaseInsensitive))
             bytes = setOpfLanguage(QString::fromUtf8(bytes), cache.lang());
 

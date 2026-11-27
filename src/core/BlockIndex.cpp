@@ -3,6 +3,7 @@
 #include <QDomDocument>
 #include <QDomElement>
 #include <QSet>
+#include <QStringList>
 
 namespace block_index {
 namespace {
@@ -56,6 +57,38 @@ bool collectLeaves(const QDomElement &el, QVector<QDomElement> &leaves)
         hasBlock = hasBlock || blk || childHas;
     }
     return hasBlock;
+}
+
+// A Spindle bilingual EPUB export carries its translations as elements of class
+// "spindle-translation" — the class reader.js gives the translations it inserts
+// itself, and hides in 原文 view. In such a book the translations are part of
+// the book's own text (the book is in the target language, so the view is
+// locked to 原文), so rename the class on everything already in the document to
+// "spindle-embedded-translation": reader.js then leaves them alone, and only
+// the translations it inserts after loading are switched by the view mode.
+void renameEmbeddedTranslations(const QDomElement &el)
+{
+    static const QString kInserted = QStringLiteral("spindle-translation");
+    static const QString kEmbedded = QStringLiteral("spindle-embedded-translation");
+    for (QDomNode n = el.firstChild(); !n.isNull(); n = n.nextSibling()) {
+        if (!n.isElement())
+            continue;
+        QDomElement c = n.toElement();
+        const QString cls = c.attribute(QStringLiteral("class"));
+        if (cls.contains(kInserted)) {
+            QStringList tokens = cls.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            bool renamed = false;
+            for (QString &t : tokens) {
+                if (t == kInserted) {
+                    t = kEmbedded;
+                    renamed = true;
+                }
+            }
+            if (renamed)
+                c.setAttribute(QStringLiteral("class"), tokens.join(QLatin1Char(' ')));
+        }
+        renameEmbeddedTranslations(c);
+    }
 }
 
 // Containers whose direct inline content is prose when it holds bare text.
@@ -318,6 +351,7 @@ QString injectBlockIds(const QString &xhtml, const QString &themeCss)
         return {};
     // Sanitize the whole document (the <head> can carry scripts too).
     sanitizeElement(doc.documentElement());
+    renameEmbeddedTranslations(body);
     normalizeBareText(body);
     QVector<QDomElement> leaves;
     collectLeaves(body, leaves);
